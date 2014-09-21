@@ -91,7 +91,9 @@ class SSTPProtocol(Protocol):
     state = SERVER_CALL_DISCONNECTED
     sstpPacketLength = 0
     reciveBuffer = ''
+    nonce = None
     pppd = None
+    retryCounter = 0
 
     def __init__(self):
         self.helloTimer = reactor.callLater(60, self.helloTimerExpired)
@@ -186,9 +188,9 @@ class SSTPProtocol(Protocol):
         elif messageType == SSTP_MSG_CALL_CONNECTED:
             attr = attributes[0][1]
             hashType = attr[3:4]
-            nonce = attr[8:40]
-            certHash = attr[40:72]
-            macHash = attr[72:80]
+            nonce = attr[4:36]
+            certHash = attr[36:68]
+            macHash = attr[68:72]
             self.sstpMsgCallConnectedRecived(hashType, nonce, certHash, macHash)
         elif messageType == SSTP_MSG_CALL_ABORT:
             if attributes:
@@ -209,6 +211,7 @@ class SSTPProtocol(Protocol):
         else:
             print('Unknown type.')
             print(attributes)
+            self.abort(ATTRIB_STATUS_INVALID_FRAME_RECEIVED)
 
 
     def sstpMsgCallConnectRequestRecived(self, protocolId):
@@ -218,11 +221,15 @@ class SSTPProtocol(Protocol):
             return
         if protocolId != SSTP_ENCAPSULATED_PROTOCOL_PPP:
             print('Unsupported encapsulated protocol.')
-            self.transport.loseConnection()
+            nak = SSTPControlPacket(SSTP_MSG_CALL_CONNECT_NAK)
+            nak.attributes = [(SSTP_ATTRIB_ENCAPSULATED_PROTOCOL_ID,
+                    ATTRIB_STATUS_VALUE_NOT_SUPPORTED)]
+            self.addRetryCounterOrAbrot()
             return
+        self.nonce = os.urandom(32)
         ack = SSTPControlPacket(SSTP_MSG_CALL_CONNECT_ACK)
         ack.attributes = [(SSTP_ATTRIB_CRYPTO_BINDING_REQ,
-                '\x00\x00\x00' + '\x03' + os.urandom(32))]
+                '\x00\x00\x00' + '\x03' + self.nonce)]
         self.transport.write(ack.dump())
         self.pppd = PPPDProtocol()
         self.pppd.sstp = self
@@ -235,13 +242,27 @@ class SSTPProtocol(Protocol):
 
 
     def sstpMsgCallConnectedRecived(self, hashType, nonce, certHash, macHash):
+        if self.state != SERVER_CALL_CONNECTED_PENDING:
+            self.abort(ATTRIB_STATUS_UNACCEPTED_FRAME_RECEIVED)
+        if nonce != self.nonce:
+            print('Wrong nonce.')
+            self.abort(ATTRIB_STATUS_INVALID_FRAME_RECEIVED)
+            return
+        self.nonce = None
+        # TODO: check certHash and macHash
         self.state = SERVER_CALL_CONNECTED
 
 
     def sstpMsgCallAbort(self, status=None):
         print("Call abort.")
-        print(ord(status[-1]))
-        self.transport.loseConnection()
+        if self.state == CALL_ABORT_PENDING:
+            reactor.callLater(1, self.transport.loseConnection)
+            return
+        self.state = CALL_ABORT_IN_PROGRESS_2
+        msg = SSTPControlPacket(SSTP_MSG_CALL_ABORT)
+        self.transport.write(msg.dump())
+        self.state = CALL_ABORT_PENDING
+        reactor.callLater(1, self.transport.loseConnection)
 
 
     def sstpMsgCallDisconnect(self, status=None):
@@ -271,12 +292,29 @@ class SSTPProtocol(Protocol):
             self.transport.loseConnection()  # TODO: follow HTTP
         elif close:
             print('Hello time out.')
-            self.transport.loseConnection()  # TODO: send call abort
+            self.abort(ATTRIB_STATUS_NEGOTIATION_TIMEOUT)
         else:
             print('Send echo request.')
             echo = SSTPControlPacket(SSTP_MSG_ECHO_REQUEST)
             self.transport.write(echo.dump())
             self.helloTimer = reactor.callLater(60, self.helloTimerExpired, True)
+
+
+    def addRetryCounterOrAbrot(self):
+        self.retryCounter += 1
+        if self.retryCounter > 3:
+            self.abort(ATTRIB_STATUS_RETRY_COUNT_EXCEEDED)
+
+
+    def abort(self, status=None):
+        print('Abort (%s).' % ord(status[-1]))
+        self.state = CALL_DISCONNECT_IN_PROGRESS_1
+        msg = SSTPControlPacket(SSTP_MSG_CALL_ABORT)
+        if status is not None:
+            msg.attributes = [(SSTP_ATTRIB_STATUS_INFO, status)]
+        self.transport.write(msg.dump())
+        self.state = CALL_ABORT_PENDING
+        reactor.callLater(3, self.transport.loseConnection)
 
 
 class SSTPProtocolFactory(Factory):
