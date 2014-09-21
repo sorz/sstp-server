@@ -110,6 +110,7 @@ class SSTPProtocol(Protocol):
         logging.info('Connection finished.')
         if self.pppd is not None:
             self.pppd.transport.loseConnection()
+            self.factory.remotePool.unregister(self.pppd.remote)
         if self.helloTimer.active():
             self.helloTimer.cancel()
 
@@ -229,11 +230,15 @@ class SSTPProtocol(Protocol):
         self.transport.write(ack.dump())
         self.pppd = PPPDProtocol()
         self.pppd.sstp = self
+        self.pppd.remote = self.factory.remotePool.apply()
+        if self.pppd.remote is None:
+            logging.warn('IP address pool is full. '
+                    'Cannot accpet new connection.')
+            self.abort()
+        addressArgument = '%s:%s' % (self.factory.local, self.pppd.remote)
         reactor.spawnProcess(self.pppd, self.factory.pppd,
                 args=['local', 'notty','file', self.factory.pppdConfigFile,
-                    '115200', '10.10.25.1:10.10.25.50',
-                    'ipparam', '202.86.179.90',
-                    'remotenumber', '202.86.179.90'],
+                    '115200', addressArgument, 'sync'],
                 usePTY=False, childFDs={0:'w', 1:'r', 2:'r'})
         self.state = SERVER_CALL_CONNECTED_PENDING
 
@@ -321,7 +326,9 @@ class SSTPProtocol(Protocol):
 class SSTPProtocolFactory(Factory):
     protocol = SSTPProtocol
 
-    def __init__(self, pppd, pppdConfigFile):
+    def __init__(self, pppd, pppdConfigFile, local, remotePool):
         self.pppd = pppd
         self.pppdConfigFile = pppdConfigFile
+        self.local = local
+        self.remotePool = remotePool
 

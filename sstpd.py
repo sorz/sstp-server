@@ -5,6 +5,7 @@ from twisted.internet.endpoints import SSL4ServerEndpoint
 from twisted.internet import reactor, ssl
 
 from protocols import SSTPProtocolFactory
+from address import IPPool
 
 
 def _getArgs():
@@ -29,6 +30,15 @@ def _getArgs():
             default='/etc/ppp/options.sstpd',
             metavar='CONFIG-FILE',
             help='Default to /etc/ppp/options.sstpd')
+    parser.add_argument('--local',
+            default='192.168.20.1',
+            metavar='ADDRESS',
+            help="Address of server side on ppp, default to 192.168.20.1")
+    parser.add_argument('--remote',
+            default='192.168.20.0/24',
+            metavar='NETWORK',
+            help="Address of client will be selected from it, "
+                "default to 192.168.20.0/24")
 
     return parser.parse_args()
 
@@ -37,7 +47,9 @@ def main():
     logging.basicConfig(level=logging.INFO,
             format='%(asctime)s %(levelname)-s: %(message)s')
     args = _getArgs()
-    print(args)
+
+    ippool = IPPool(args.remote)
+    ippool.register(args.local)
 
     try:
         certData = open(args.pem_cert).read()
@@ -45,9 +57,10 @@ def main():
         logging.critical(e)
         logging.critical('Cannot read certificate.')
         return
-
     certificate = ssl.PrivateCertificate.loadPEM(certData)
-    factory = SSTPProtocolFactory(pppd=args.pppd, pppdConfigFile=args.pppd_config)
+
+    factory = SSTPProtocolFactory(pppd=args.pppd, pppdConfigFile=args.pppd_config,
+            local=args.local, remotePool=ippool)
     reactor.listenSSL(args.listen_port, factory,
             certificate.options(), interface=args.listen)
     logging.info('Listening on %s:%s...' % (args.listen, args.listen_port))
