@@ -1,6 +1,8 @@
 import struct
 
-from hexdump import hexdump
+
+def hexdump():
+    pass
 
 
 def parseLength(s):
