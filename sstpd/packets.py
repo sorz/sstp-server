@@ -1,7 +1,5 @@
 import struct
 
-from hexdump import hexdump
-
 
 class SSTPPacket(object):
     _version = '\x10'
