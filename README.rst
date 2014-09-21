@@ -13,9 +13,20 @@ Requirements
 Install
 =======
 
+Install from PyPI (may unavaliable now):
 ::
 
     # pip install sstp-server
+
+
+Install from GitHub:
+::
+
+    $ wget https://github.com/sorz/sstp-server/archive/master.zip
+    $ unzip master
+    $ cd sstp-server-master
+    # ./setup.py install
+
 
 Usage
 =====
