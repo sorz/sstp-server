@@ -229,9 +229,10 @@ class SSTPProtocol(Protocol):
         self.transport.write(ack.dump())
         self.pppd = PPPDProtocol()
         self.pppd.sstp = self
-        reactor.spawnProcess(self.pppd, '/usr/sbin/pppd',
-                args=['local', 'notty','file', '/etc/ppp/options.sstpd', '115200',
-                    '10.10.25.1:10.10.25.50', 'ipparam', '202.86.179.90',
+        reactor.spawnProcess(self.pppd, self.factory.pppd,
+                args=['local', 'notty','file', self.factory.pppdConfigFile,
+                    '115200', '10.10.25.1:10.10.25.50',
+                    'ipparam', '202.86.179.90',
                     'remotenumber', '202.86.179.90'],
                 usePTY=False, childFDs={0:'w', 1:'r', 2:'r'})
         self.state = SERVER_CALL_CONNECTED_PENDING
@@ -318,6 +319,9 @@ class SSTPProtocol(Protocol):
 
 
 class SSTPProtocolFactory(Factory):
-    def buildProtocol(self, addr):
-        return SSTPProtocol()
+    protocol = SSTPProtocol
+
+    def __init__(self, pppd, pppdConfigFile):
+        self.pppd = pppd
+        self.pppdConfigFile = pppdConfigFile
 
