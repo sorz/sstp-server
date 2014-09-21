@@ -1,6 +1,6 @@
 import os
 import struct
-
+import logging
 from twisted.internet.protocol import Factory, Protocol, ProcessProtocol
 from twisted.internet import reactor
 
@@ -31,49 +31,49 @@ class PPPDProtocol(ProcessProtocol):
 
             if len(self.reciveBuffer) < self.pppFrameLength:
                 return
-            self.pppFrameRecived(self.reciveBuffer[:self.pppFrameLength])
+            self.pppFrameReceived(self.reciveBuffer[:self.pppFrameLength])
             self.reciveBuffer = self.reciveBuffer[self.pppFrameLength:]
             self.pppFrameLength = 0
 
 
-    def pppFrameRecived(self, frame):
+    def pppFrameReceived(self, frame):
         if frame.startswith('\xff\x03'):
             protocol = frame[2:4]
         else:
             protocol = frame[:2]
         if ord(protocol[0]) < ord('\x80'):
-            self.pppDataFrameRecived(frame)
+            self.pppDataFrameReceived(frame)
         else:
-            self.pppControlFrameRecived(frame)
+            self.pppControlFrameReceived(frame)
 
 
-    def pppControlFrameRecived(self, frame):
-        #print('PPP control frame recived (%s bytes)' % len(frame))
+    def pppControlFrameReceived(self, frame):
+        logging.debug('PPP control frame received (%s bytes).' % len(frame))
         if self.sstp.state == SERVER_CALL_CONNECTED_PENDING or \
                 self.sstp.state == SERVER_CALL_CONNECTED:
             packet = SSTPDataPacket(frame)
             self.sstp.transport.write(packet.dump())
 
 
-    def pppDataFrameRecived(self, frame):
-        #print('PPP data frame recived (%s bytes)' % len(frame))
+    def pppDataFrameReceived(self, frame):
+        logging.debug('PPP data frame received (%s bytes).' % len(frame))
         if self.sstp.state == SERVER_CALL_CONNECTED:
             packet = SSTPDataPacket(frame)
             self.sstp.transport.write(packet.dump())
 
 
     def errReceived(self, data):
-        print('Recived data from stderr of pppd.')
-        print(data)
+        logging.warn('Received errors from pppd.')
+        logging.warn(data)
 
 
     def outConnectionLost(self):
-        print('pppd stdout lost.')
+        logging.debug('pppd stdout lost.')
         self.sstp.transport.loseConnection()
 
 
     def processEnded(self, reason):
-        print('pppd ended.')
+        logging.info('pppd stopped.')
         if (self.sstp.state != SERVER_CONNECT_REQUEST_PENDING and
                 self.sstp.state != SERVER_CALL_CONNECTED_PENDING and
                 self.sstp.state != SERVER_CALL_CONNECTED):
@@ -100,23 +100,21 @@ class SSTPProtocol(Protocol):
 
 
     def dataReceived(self, data):
-        #print("Data Recived %s bytes" % len(data))
         if self.state == SERVER_CALL_DISCONNECTED:
-            self.httpDataRecived(data)
+            self.httpDataReceived(data)
         else:
-            self.sstpDataRecived(data)
+            self.sstpDataReceived(data)
 
 
     def connectionLost(self, reason):
-        print('Connection lost.')
-        #print(reason)
+        logging.info('Connection finished.')
         if self.pppd is not None:
             self.pppd.transport.loseConnection()
         if self.helloTimer.active():
             self.helloTimer.cancel()
 
 
-    def httpDataRecived(self, data):
+    def httpDataReceived(self, data):
         self.reciveBuffer += data
         if "\r\n\r\n" not in self.reciveBuffer:
             return
@@ -124,8 +122,8 @@ class SSTPProtocol(Protocol):
         self.reciveBuffer = ''
         method, uri, version = requestLine.split()
         if method != "SSTP_DUPLEX_POST" and version != "HTTP/1.1":
+            logging.warn('Unexpected HTTP method and/or version.')
             self.transport.loseConnection()
-            #print('Unexpected HTTP method and/or version.')
             return
         self.transport.write('HTTP/1.1 200 OK\r\n'
                 'Content-Length: 18446744073709551615\r\n'
@@ -133,12 +131,12 @@ class SSTPProtocol(Protocol):
         self.state = SERVER_CONNECT_REQUEST_PENDING
 
 
-    def sstpDataRecived(self, data):
+    def sstpDataReceived(self, data):
         self.reciveBuffer += data
         while len(self.reciveBuffer) >= 4:
             # Check version.
-            if (self.reciveBuffer[0] != '\x10'):
-                print('Unsupported SSTP version.')
+            if self.reciveBuffer[0] != '\x10':
+                logging.warn('Unsupported SSTP version.')
                 self.transport.loseConnection()
                 return
             # Get length if necessary.
@@ -149,14 +147,14 @@ class SSTPProtocol(Protocol):
             packet = self.reciveBuffer[:self.sstpPacketLength]
             self.reciveBuffer = self.reciveBuffer[self.sstpPacketLength:]
             self.sstpPacketLength = 0
-            self.sstpPacketRecived(packet)
+            self.sstpPacketReceived(packet)
 
 
-    def sstpPacketRecived(self, packet):
+    def sstpPacketReceived(self, packet):
         self.helloTimer.reset(60)
         c = ord(packet[1]) & 0x01
         if c == 0:  # Data packet
-            self.sstpDataPacketRecived(packet[4:])
+            self.sstpDataPacketReceived(packet[4:])
         else:  # Control packet
             messageType = packet[4:6]
             numAttributes = struct.unpack('!H', packet[6:8])[0]
@@ -168,30 +166,29 @@ class SSTPProtocol(Protocol):
                 value = attrs[4:length]
                 attrs = attrs[length:]
                 attributes.append((id, value))
-            self.sstpControlPacketRecived(messageType, attributes)
+            self.sstpControlPacketReceived(messageType, attributes)
 
 
-    def sstpDataPacketRecived(self, data):
-        #print('<<< Forwarding sstp to pppd (%s bytes).' % len(data))
-        #print(hexdump(data))
+    def sstpDataPacketReceived(self, data):
+        logging.debug('Forwarding SSTP data to pppd (%s bytes).' % len(data))
         if self.pppd is None:
             print('pppd is None.')
             return
         self.pppd.transport.write(data)
 
 
-    def sstpControlPacketRecived(self, messageType, attributes):
-        print('SSTP control packet (type %s) recived.' % ord(messageType[1]))
+    def sstpControlPacketReceived(self, messageType, attributes):
+        logging.info('SSTP control packet (type %s) received.' % ord(messageType[1]))
         if messageType == SSTP_MSG_CALL_CONNECT_REQUEST:
             protocolId = attributes[0][1]
-            self.sstpMsgCallConnectRequestRecived(protocolId)
+            self.sstpMsgCallConnectRequestReceived(protocolId)
         elif messageType == SSTP_MSG_CALL_CONNECTED:
             attr = attributes[0][1]
             hashType = attr[3:4]
             nonce = attr[4:36]
             certHash = attr[36:68]
             macHash = attr[68:72]
-            self.sstpMsgCallConnectedRecived(hashType, nonce, certHash, macHash)
+            self.sstpMsgCallConnectedReceived(hashType, nonce, certHash, macHash)
         elif messageType == SSTP_MSG_CALL_ABORT:
             if attributes:
                 self.sstpMsgCallAbort(attributes[0][1])
@@ -209,12 +206,11 @@ class SSTPProtocol(Protocol):
         elif messageType == SSTP_MSG_ECHO_RESPONSE:
             self.sstpMsgEchoResponse()
         else:
-            print('Unknown type.')
-            print(attributes)
+            logging.warn('Unknown type of SSTP control packet.')
             self.abort(ATTRIB_STATUS_INVALID_FRAME_RECEIVED)
 
 
-    def sstpMsgCallConnectRequestRecived(self, protocolId):
+    def sstpMsgCallConnectRequestReceived(self, protocolId):
         if self.state != SERVER_CONNECT_REQUEST_PENDING:
             print('Not in the state.')
             self.transport.loseConnection()
@@ -241,20 +237,21 @@ class SSTPProtocol(Protocol):
         self.state = SERVER_CALL_CONNECTED_PENDING
 
 
-    def sstpMsgCallConnectedRecived(self, hashType, nonce, certHash, macHash):
+    def sstpMsgCallConnectedReceived(self, hashType, nonce, certHash, macHash):
         if self.state != SERVER_CALL_CONNECTED_PENDING:
             self.abort(ATTRIB_STATUS_UNACCEPTED_FRAME_RECEIVED)
         if nonce != self.nonce:
-            print('Wrong nonce.')
+            logging.warn('Received wrong nonce.')
             self.abort(ATTRIB_STATUS_INVALID_FRAME_RECEIVED)
             return
         self.nonce = None
         # TODO: check certHash and macHash
         self.state = SERVER_CALL_CONNECTED
+        logging.info('Connection established.')
 
 
     def sstpMsgCallAbort(self, status=None):
-        print("Call abort.")
+        logging.warn("Call abort.")
         if self.state == CALL_ABORT_PENDING:
             reactor.callLater(1, self.transport.loseConnection)
             return
@@ -266,7 +263,7 @@ class SSTPProtocol(Protocol):
 
 
     def sstpMsgCallDisconnect(self, status=None):
-        print('Call disconnect.')
+        logging.info('Received call disconnect request.')
         self.state = CALL_DISCONNECT_IN_PROGRESS_2
         ack = SSTPControlPacket(SSTP_MSG_CALL_DISCONNECT_ACK)
         self.transport.write(ack.dump())
@@ -291,10 +288,10 @@ class SSTPProtocol(Protocol):
         if self.state == SERVER_CALL_DISCONNECTED:
             self.transport.loseConnection()  # TODO: follow HTTP
         elif close:
-            print('Hello time out.')
+            logging.warn('Ping time out.')
             self.abort(ATTRIB_STATUS_NEGOTIATION_TIMEOUT)
         else:
-            print('Send echo request.')
+            logging.info('Send echo request.')
             echo = SSTPControlPacket(SSTP_MSG_ECHO_REQUEST)
             self.transport.write(echo.dump())
             self.helloTimer = reactor.callLater(60, self.helloTimerExpired, True)
@@ -307,7 +304,10 @@ class SSTPProtocol(Protocol):
 
 
     def abort(self, status=None):
-        print('Abort (%s).' % ord(status[-1]))
+        if status is None:
+            logging.warn('Abort.')
+        else:
+            logging.warn('Abort (%s).' % ord(status[-1]))
         self.state = CALL_DISCONNECT_IN_PROGRESS_1
         msg = SSTPControlPacket(SSTP_MSG_CALL_ABORT)
         if status is not None:
