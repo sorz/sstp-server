@@ -15,19 +15,18 @@ class PPPDProtocol(ProcessProtocol):
 
     def outReceived(self, data):
         self.reciveBuffer += data
-        while len(self.reciveBuffer) >= 6:
+        while len(self.reciveBuffer) >= 8:
             # Get length of frame if necessary.
             if not self.pppFrameLength:
-                if self.reciveBuffer.startswith('\xff\x03'):
-                    if len(self.reciveBuffer) < 8:
-                        return
-                    length = self.reciveBuffer[6:8]
-                    headerLength = 4
-                else:
-                    length = self.reciveBuffer[4:6]
-                    headerLength = 2
+                pppHeadLen = 4  # Address (1) + Control (1) + Protocol (2)
+                if not self.reciveBuffer.startswith('\xff\x03'):
+                    pppHeadLen -= 2  # Omit Address and Control
+                protocol = self.reciveBuffer[pppHeadLen - 2]
+                if protocol not in '\x00\x02\x20\x40\x80\x82\xc0\xc2\xc4':
+                    pppHeadLen -= 1  # Protocol-Field-Compression enabled.
+                length = self.reciveBuffer[pppHeadLen+2:pppHeadLen+4]
                 self.pppFrameLength = struct.unpack('!H', length)[0] \
-                        + headerLength
+                        + pppHeadLen
 
             if len(self.reciveBuffer) < self.pppFrameLength:
                 return
@@ -41,10 +40,10 @@ class PPPDProtocol(ProcessProtocol):
             protocol = frame[2:4]
         else:
             protocol = frame[:2]
-        if ord(protocol[0]) < ord('\x80'):
-            self.pppDataFrameReceived(frame)
-        else:
+        if protocol[0] in '\x80\x82\xc0\xc2\xc4':
             self.pppControlFrameReceived(frame)
+        else:
+            self.pppDataFrameReceived(frame)
 
 
     def pppControlFrameReceived(self, frame):
@@ -237,7 +236,7 @@ class SSTPProtocol(Protocol):
             self.abort()
         addressArgument = '%s:%s' % (self.factory.local, self.pppd.remote)
         reactor.spawnProcess(self.pppd, self.factory.pppd,
-                args=['local', 'notty','file', self.factory.pppdConfigFile,
+                args=['local', 'notty', 'file', self.factory.pppdConfigFile,
                     '115200', addressArgument, 'sync'],
                 usePTY=False, childFDs={0:'w', 1:'r', 2:'r'})
         self.state = SERVER_CALL_CONNECTED_PENDING

@@ -40,7 +40,6 @@ A example:
         name sstpd
         require-mschap-v2
         nodefaultroute
-        nopcomp
         ms-dns 8.8.8.8
         ms-dns 8.8.4.4
 
