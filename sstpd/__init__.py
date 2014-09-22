@@ -11,7 +11,7 @@ from address import IPPool
 def _getArgs():
     parser = argparse.ArgumentParser(description='A Secure Socket Tunneling '
             'Protocol (SSTP) server.',
-            epilog='Auther: @xierch <orz@sorz.org>.')
+            epilog='Auther: Sorz <orz@sorz.org>.')
     parser.add_argument('-l', '--listen',
             default='',
             metavar='ADDRESS',

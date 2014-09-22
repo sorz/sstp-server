@@ -9,7 +9,7 @@ setup(
     name='sstp-server',
     version='0.1.0',
     description='Secure Socket Tunneling Protocol (SSTP) VPN tunel server.',
-    author='sorz',
+    author='Sorz',
     author_email='orz@sorz.org',
     url='https://github.com/sorz/sstp-server',
     packages=['sstpd'],
