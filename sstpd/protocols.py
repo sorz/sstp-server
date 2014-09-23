@@ -211,12 +211,15 @@ class SSTPProtocol(Protocol):
 
 
     def sstpMsgCallConnectRequestReceived(self, protocolId):
+        if self.state in (CALL_ABORT_TIMEOUT_PENDING, CALL_ABORT_PENDING,
+                CALL_DISCONNECT_ACK_PENDING, CALL_DISCONNECT_TIMEOUT_PENDING):
+            return
         if self.state != SERVER_CONNECT_REQUEST_PENDING:
-            print('Not in the state.')
+            logging.warn('Not in the state.')
             self.transport.loseConnection()
             return
         if protocolId != SSTP_ENCAPSULATED_PROTOCOL_PPP:
-            print('Unsupported encapsulated protocol.')
+            logging.warn('Unsupported encapsulated protocol.')
             nak = SSTPControlPacket(SSTP_MSG_CALL_CONNECT_NAK)
             nak.attributes = [(SSTP_ATTRIB_ENCAPSULATED_PROTOCOL_ID,
                     ATTRIB_STATUS_VALUE_NOT_SUPPORTED)]
@@ -243,6 +246,9 @@ class SSTPProtocol(Protocol):
 
 
     def sstpMsgCallConnectedReceived(self, hashType, nonce, certHash, macHash):
+        if self.state in (CALL_ABORT_TIMEOUT_PENDING, CALL_ABORT_PENDING,
+                CALL_DISCONNECT_ACK_PENDING, CALL_DISCONNECT_TIMEOUT_PENDING):
+            return
         if self.state != SERVER_CALL_CONNECTED_PENDING:
             self.abort(ATTRIB_STATUS_UNACCEPTED_FRAME_RECEIVED)
         if nonce != self.nonce:
@@ -256,6 +262,9 @@ class SSTPProtocol(Protocol):
 
 
     def sstpMsgCallAbort(self, status=None):
+        if self.state in (CALL_ABORT_TIMEOUT_PENDING,
+                CALL_DISCONNECT_TIMEOUT_PENDING):
+            return
         logging.warn("Call abort.")
         if self.state == CALL_ABORT_PENDING:
             reactor.callLater(1, self.transport.loseConnection)
@@ -268,6 +277,9 @@ class SSTPProtocol(Protocol):
 
 
     def sstpMsgCallDisconnect(self, status=None):
+        if self.state in (CALL_ABORT_TIMEOUT_PENDING, CALL_ABORT_PENDING,
+                CALL_DISCONNECT_TIMEOUT_PENDING):
+            return
         logging.info('Received call disconnect request.')
         self.state = CALL_DISCONNECT_IN_PROGRESS_2
         ack = SSTPControlPacket(SSTP_MSG_CALL_DISCONNECT_ACK)
@@ -277,16 +289,31 @@ class SSTPProtocol(Protocol):
 
 
     def sstpMsgCallDisconnectAck(self):
-        self.transport.loseConnection()
+        if self.state == CALL_DISCONNECT_ACK_PENDING:
+            self.transport.loseConnection()
+        elif self.state in (CALL_ABORT_PENDING, CALL_ABORT_TIMEOUT_PENDING,
+                CALL_DISCONNECT_TIMEOUT_PENDING):
+            return
+        self.abort(ATTRIB_STATUS_UNACCEPTED_FRAME_RECEIVED)
 
 
     def sstpMsgEchoRequest(self):
-        response = SSTPControlPacket(SSTP_MSG_ECHO_RESPONSE)
-        self.transport.write(response)
+        if self.state == SERVER_CALL_DISCONNECTED:
+            response = SSTPControlPacket(SSTP_MSG_ECHO_RESPONSE)
+            self.transport.write(response)
+        elif self.state in (CALL_ABORT_TIMEOUT_PENDING, CALL_ABORT_PENDING,
+                CALL_DISCONNECT_ACK_PENDING, CALL_DISCONNECT_TIMEOUT_PENDING):
+            return
+        self.abort(ATTRIB_STATUS_UNACCEPTED_FRAME_RECEIVED)
 
 
     def sstpMsgEchoResponse(self):
-        self.helloTimer = reactor.callLater(60, self.helloTimerExpired)
+        if self.state == SERVER_CALL_DISCONNECTED:
+            self.helloTimer = reactor.callLater(60, self.helloTimerExpired)
+        elif self.state in (CALL_ABORT_TIMEOUT_PENDING, CALL_ABORT_PENDING,
+                CALL_DISCONNECT_ACK_PENDING, CALL_DISCONNECT_TIMEOUT_PENDING):
+            return
+        self.abort(ATTRIB_STATUS_UNACCEPTED_FRAME_RECEIVED)
 
 
     def helloTimerExpired(self, close=False):
