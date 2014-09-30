@@ -52,7 +52,7 @@ Start server:
 Known Issues
 ------------
 
-Not yet implement *Crypto Binding*. It may be vulnerable by MITM attck.
+Not yet implement *Crypto Binding*. It may be vulnerable by MITM attack.
 
 License
 -------
