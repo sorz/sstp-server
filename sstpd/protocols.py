@@ -239,9 +239,8 @@ class SSTPProtocol(Protocol):
             self.abort()
         addressArgument = '%s:%s' % (self.factory.local, self.pppd.remote)
         reactor.spawnProcess(self.pppd, self.factory.pppd,
-                args=['local', 'notty', 'file', self.factory.pppdConfigFile,
-                    '115200', addressArgument, 'sync'],
-                usePTY=False, childFDs={0:'w', 1:'r', 2:'r'})
+                args=['local', 'file', self.factory.pppdConfigFile,
+                    '115200', addressArgument, 'sync'], usePTY=True)
         self.state = SERVER_CALL_CONNECTED_PENDING
 
 
