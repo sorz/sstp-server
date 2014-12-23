@@ -1,4 +1,5 @@
 #!/usr/bin/env python2
+import sys
 import logging
 import argparse
 from twisted.internet.endpoints import SSL4ServerEndpoint
@@ -20,9 +21,12 @@ def _getArgs():
             default=443, type=int,
             metavar='PORT')
     parser.add_argument('-c', '--pem-cert',
-            required=True,
             metavar='PEM-FILE',
             help='The path of PEM-format certificate with key.')
+    parser.add_argument('-n', '--no-ssl',
+            action='store_true',
+            help='Use plain HTTP instead of HTTPS. '
+                 'Useful when running behind a reverse proxy (nginx).')
     parser.add_argument('--pppd',
             default='/usr/sbin/pppd',
             metavar='PPPD-FILE')
@@ -43,6 +47,19 @@ def _getArgs():
     return parser.parse_args()
 
 
+def _load_cert(path):
+    if not path:
+        logging.error('argument -c/--pem-cert is required')
+        return
+    try:
+        certData = open(path).read()
+    except IOError as e:
+        logging.critical(e)
+        logging.critical('Cannot read certificate.')
+        return
+    return ssl.PrivateCertificate.loadPEM(certData)
+
+
 def main():
     logging.basicConfig(level=logging.INFO,
             format='%(asctime)s %(levelname)-s: %(message)s')
@@ -51,18 +68,21 @@ def main():
     ippool = IPPool(args.remote)
     ippool.register(args.local)
 
-    try:
-        certData = open(args.pem_cert).read()
-    except IOError as e:
-        logging.critical(e)
-        logging.critical('Cannot read certificate.')
-        return
-    certificate = ssl.PrivateCertificate.loadPEM(certData)
-
     factory = SSTPProtocolFactory(pppd=args.pppd, pppdConfigFile=args.pppd_config,
             local=args.local, remotePool=ippool)
-    reactor.listenSSL(args.listen_port, factory,
-            certificate.options(), interface=args.listen)
+
+    if args.no_ssl:
+        logging.info('Running without SSL.')
+        reactor.listenTCP(args.listen_port, factory)
+    else:
+        certificate = _load_cert(args.pem_cert)
+        if certificate is None:
+            logging.critical('Cannot read certificate.')
+            sys.exit(2)
+            return
+        reactor.listenSSL(args.listen_port, factory,
+                certificate.options(), interface=args.listen)
+
     logging.info('Listening on %s:%s...' % (args.listen, args.listen_port))
     reactor.run()
 
