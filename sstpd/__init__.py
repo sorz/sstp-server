@@ -26,7 +26,7 @@ def _getArgs():
     parser.add_argument('-n', '--no-ssl',
             action='store_true',
             help='Use plain HTTP instead of HTTPS. '
-                 'Useful when running behind a reverse proxy (nginx).')
+                 'Useful when running behind a reverse proxy.')
     parser.add_argument('--pppd',
             default='/usr/sbin/pppd',
             metavar='PPPD-FILE')
