@@ -297,7 +297,7 @@ class SSTPProtocol(Protocol):
 
 
     def sstpMsgEchoRequest(self):
-        if self.state == SERVER_CALL_DISCONNECTED:
+        if self.state == SERVER_CALL_CONNECTED:
             response = SSTPControlPacket(SSTP_MSG_ECHO_RESPONSE)
             self.transport.write(response)
         elif self.state in (CALL_ABORT_TIMEOUT_PENDING, CALL_ABORT_PENDING,
@@ -307,7 +307,7 @@ class SSTPProtocol(Protocol):
 
 
     def sstpMsgEchoResponse(self):
-        if self.state == SERVER_CALL_DISCONNECTED:
+        if self.state == SERVER_CALL_CONNECTED:
             self.helloTimer = reactor.callLater(60, self.helloTimerExpired)
         elif self.state in (CALL_ABORT_TIMEOUT_PENDING, CALL_ABORT_PENDING,
                 CALL_DISCONNECT_ACK_PENDING, CALL_DISCONNECT_TIMEOUT_PENDING):
