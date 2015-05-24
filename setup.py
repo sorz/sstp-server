@@ -7,7 +7,7 @@ with open('README.rst') as readme:
 
 setup(
     name='sstp-server',
-    version='0.1.1',
+    version='0.2.0',
     description='Secure Socket Tunneling Protocol (SSTP) VPN tunel server.',
     author='Sorz',
     author_email='orz@sorz.org',
