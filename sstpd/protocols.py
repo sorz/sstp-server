@@ -22,7 +22,7 @@ class PPPDProtocol(ProcessProtocol):
                 if not self.reciveBuffer.startswith('\xff\x03'):
                     pppHeadLen -= 2  # Omit Address and Control
                 protocol = self.reciveBuffer[pppHeadLen - 2]
-                if protocol not in '\x00\x02\x20\x40\x80\x82\xc0\xc2\xc4':
+                if ord(protocol) & 0x01 == 1:
                     pppHeadLen -= 1  # Protocol-Field-Compression enabled.
                 length = self.reciveBuffer[pppHeadLen+2:pppHeadLen+4]
                 self.pppFrameLength = struct.unpack('!H', length)[0] \
