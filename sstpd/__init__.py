@@ -43,6 +43,10 @@ def _getArgs():
             metavar='NETWORK',
             help="Address of client will be selected from it, "
                 "default to 192.168.20.0/24")
+    parser.add_argument('-v', '--log-level',
+            default=logging.INFO, type=int,
+            metavar='LOG-LEVEL',
+            help="1 to 50. Default 20, debug 10, verbose 5.")
 
     return parser.parse_args()
 
@@ -61,9 +65,9 @@ def _load_cert(path):
 
 
 def main():
-    logging.basicConfig(level=logging.INFO,
-            format='%(asctime)s %(levelname)-s: %(message)s')
     args = _getArgs()
+    logging.basicConfig(level=args.log_level,
+            format='%(asctime)s %(levelname)-s: %(message)s')
 
     ippool = IPPool(args.remote)
     ippool.register(args.local)
