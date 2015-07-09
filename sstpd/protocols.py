@@ -299,7 +299,7 @@ class SSTPProtocol(Protocol):
     def sstpMsgEchoRequest(self):
         if self.state == SERVER_CALL_CONNECTED:
             response = SSTPControlPacket(SSTP_MSG_ECHO_RESPONSE)
-            self.transport.write(response)
+            self.transport.write(response.dump())
         elif self.state in (CALL_ABORT_TIMEOUT_PENDING, CALL_ABORT_PENDING,
                 CALL_DISCONNECT_ACK_PENDING, CALL_DISCONNECT_TIMEOUT_PENDING):
             return
