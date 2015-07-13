@@ -113,7 +113,7 @@ class PPPDProtocol(ProcessProtocol):
 class SSTPProtocol(Protocol):
     state = SERVER_CALL_DISCONNECTED
     sstpPacketLength = 0
-    reciveBuffer = ''
+    receiveBuffer = ''
     nonce = None
     pppd = None
     retryCounter = 0
@@ -139,11 +139,11 @@ class SSTPProtocol(Protocol):
 
 
     def httpDataReceived(self, data):
-        self.reciveBuffer += data
-        if "\r\n\r\n" not in self.reciveBuffer:
+        self.receiveBuffer += data
+        if "\r\n\r\n" not in self.receiveBuffer:
             return
-        requestLine = self.reciveBuffer.split('\r\n')[0]
-        self.reciveBuffer = ''
+        requestLine = self.receiveBuffer.split('\r\n')[0]
+        self.receiveBuffer = ''
         method, uri, version = requestLine.split()
         if method != "SSTP_DUPLEX_POST" and version != "HTTP/1.1":
             logging.warn('Unexpected HTTP method and/or version.')
@@ -156,20 +156,20 @@ class SSTPProtocol(Protocol):
 
 
     def sstpDataReceived(self, data):
-        self.reciveBuffer += data
-        while len(self.reciveBuffer) >= 4:
+        self.receiveBuffer += data
+        while len(self.receiveBuffer) >= 4:
             # Check version.
-            if self.reciveBuffer[0] != '\x10':
+            if self.receiveBuffer[0] != '\x10':
                 logging.warn('Unsupported SSTP version.')
                 self.transport.loseConnection()
                 return
             # Get length if necessary.
             if not self.sstpPacketLength:
-                self.sstpPacketLength = parseLength(self.reciveBuffer[2:4])
-            if len(self.reciveBuffer) < self.sstpPacketLength:
+                self.sstpPacketLength = parseLength(self.receiveBuffer[2:4])
+            if len(self.receiveBuffer) < self.sstpPacketLength:
                 return
-            packet = self.reciveBuffer[:self.sstpPacketLength]
-            self.reciveBuffer = self.reciveBuffer[self.sstpPacketLength:]
+            packet = self.receiveBuffer[:self.sstpPacketLength]
+            self.receiveBuffer = self.receiveBuffer[self.sstpPacketLength:]
             self.sstpPacketLength = 0
             self.sstpPacketReceived(packet)
 
