@@ -6,6 +6,7 @@ from twisted.internet import reactor
 
 from constants import *
 from packets import SSTPDataPacket, SSTPControlPacket
+from fcs import pppfcs16
 from utils import hexdump, parseLength
 
 
@@ -17,6 +18,21 @@ CONTROL_ESCAPE = b'\x7d'
 class PPPDProtocol(ProcessProtocol):
     frameBuffer = bytearray()
 
+    def writeFrame(self, frame):
+        fcs = pppfcs16(frame)
+        buffer = bytearray(FLAG_SEQUENCE)
+        for byte in frame:
+            if ord(byte) < 0x20 or byte in (FLAG_SEQUENCE, CONTROL_ESCAPE):
+                buffer.append(CONTROL_ESCAPE)
+                buffer.append(ord(byte) ^ 0x20)
+            else:
+                buffer.append(byte)
+
+        buffer.extend(fcs)
+        buffer.append(FLAG_SEQUENCE)
+        self.transport.write(str(buffer))
+
+
     def outReceived(self, data):
         logging.log(VERBOSE, "Raw data: %s", hexdump(data))
         escaped = False
@@ -27,35 +43,17 @@ class PPPDProtocol(ProcessProtocol):
             elif byte == CONTROL_ESCAPE:
                 escaped = True
             elif byte == FLAG_SEQUENCE:
-                if self.frameBuffer:
+                if not self.frameBuffer:
+                    continue
+                if len(self.frameBuffer) < 4:
+                    logging.warning("Invalid PPP frame received from pppd. (%s)",
+                                    hexdump(self.frameBuffer))
+                elif self.frameBuffer:
+                    del self.frameBuffer[-2:]  # Remove FCS field
                     self.pppFrameReceived(self.frameBuffer)
-                    self.frameBuffer = bytearray()
+                self.frameBuffer = bytearray()
             else:
                 self.frameBuffer.append(byte)
-
-
-    def unescapedReceived(self, data):
-        logging.log(VERBOSE, "data = %s bytes, buffer = %s bytes.",
-                len(data), len(self.reciveBuffer))
-        self.reciveBuffer += data
-        while len(self.reciveBuffer) >= 8:
-            # Get length of frame if necessary.
-            if not self.pppFrameLength:
-                pppHeadLen = 4  # Address (1) + Control (1) + Protocol (2)
-                if not self.reciveBuffer.startswith('\xff\x03'):
-                    pppHeadLen -= 2  # Omit Address and Control
-                protocol = self.reciveBuffer[pppHeadLen - 2]
-                if ord(protocol) & 0x01 == 1:
-                    pppHeadLen -= 1  # Protocol-Field-Compression enabled.
-                length = self.reciveBuffer[pppHeadLen+2:pppHeadLen+4]
-                self.pppFrameLength = struct.unpack('!H', length)[0] \
-                        + pppHeadLen
-
-            if len(self.reciveBuffer) < self.pppFrameLength:
-                return
-            self.pppFrameReceived(self.reciveBuffer[:self.pppFrameLength])
-            self.reciveBuffer = self.reciveBuffer[self.pppFrameLength:]
-            self.pppFrameLength = 0
 
 
     def pppFrameReceived(self, frame):
@@ -201,7 +199,7 @@ class SSTPProtocol(Protocol):
         if self.pppd is None:
             print('pppd is None.')
             return
-        self.pppd.transport.write(data)
+        self.pppd.writeFrame(data)
 
 
     def sstpControlPacketReceived(self, messageType, attributes):
