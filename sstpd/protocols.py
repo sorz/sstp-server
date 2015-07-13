@@ -11,11 +11,30 @@ from utils import hexdump, parseLength
 
 VERBOSE = 5  # log level
 
+FLAG_SEQUENCE = b'\x7e'
+CONTROL_ESCAPE = b'\x7d'
+
 class PPPDProtocol(ProcessProtocol):
-    reciveBuffer = ''
-    pppFrameLength = 0
+    frameBuffer = bytearray()
 
     def outReceived(self, data):
+        logging.log(VERBOSE, "Raw data: %s", hexdump(data))
+        escaped = False
+        for byte in data:
+            if escaped:
+                escaped = False
+                self.frameBuffer.append(ord(byte) ^ 0x20)
+            elif byte == CONTROL_ESCAPE:
+                escaped = True
+            elif byte == FLAG_SEQUENCE:
+                if self.frameBuffer:
+                    self.pppFrameReceived(self.frameBuffer)
+                    self.frameBuffer = bytearray()
+            else:
+                self.frameBuffer.append(byte)
+
+
+    def unescapedReceived(self, data):
         logging.log(VERBOSE, "data = %s bytes, buffer = %s bytes.",
                 len(data), len(self.reciveBuffer))
         self.reciveBuffer += data
@@ -40,11 +59,12 @@ class PPPDProtocol(ProcessProtocol):
 
 
     def pppFrameReceived(self, frame):
+        logging.log(VERBOSE, "Frame: %s", hexdump(frame))
         if frame.startswith('\xff\x03'):
             protocol = frame[2:4]
         else:
             protocol = frame[:2]
-        if protocol[0] in '\x80\x82\xc0\xc2\xc4':
+        if protocol[0] in (0x80, 0x82, 0xc0, 0xc2, 0xc4):
             self.pppControlFrameReceived(frame)
         else:
             self.pppDataFrameReceived(frame)
@@ -248,7 +268,7 @@ class SSTPProtocol(Protocol):
         addressArgument = '%s:%s' % (self.factory.local, self.pppd.remote)
         reactor.spawnProcess(self.pppd, self.factory.pppd,
                 args=['local', 'file', self.factory.pppdConfigFile,
-                    '115200', addressArgument, 'sync'], usePTY=True)
+                    '115200', addressArgument], usePTY=True)
         self.state = SERVER_CALL_CONNECTED_PENDING
 
 

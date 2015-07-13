@@ -6,7 +6,7 @@ class hexdump(object):
         self.s = s
 
     def __str__(self):
-        return self.s.encode("hex")
+        return str(self.s).encode("hex")
 
 
 def parseLength(s):
