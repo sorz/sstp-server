@@ -76,7 +76,7 @@ class PPPDProtocol(ProcessProtocol):
         if self.sstp.state == SERVER_CALL_CONNECTED_PENDING or \
                 self.sstp.state == SERVER_CALL_CONNECTED:
             packet = SSTPDataPacket(frame)
-            self.sstp.transport.write(packet.dump())
+            packet.writeTo(self.sstp.transport.write)
 
 
     def pppDataFrameReceived(self, frame):
@@ -84,7 +84,7 @@ class PPPDProtocol(ProcessProtocol):
         logging.log(VERBOSE, hexdump(frame))
         if self.sstp.state == SERVER_CALL_CONNECTED:
             packet = SSTPDataPacket(frame)
-            self.sstp.transport.write(packet.dump())
+            packet.writeTo(self.sstp.transport.write)
 
 
     def errReceived(self, data):
@@ -107,7 +107,7 @@ class PPPDProtocol(ProcessProtocol):
         self.sstp.state = CALL_DISCONNECT_IN_PROGRESS_1
         msg = SSTPControlPacket(SSTP_MSG_CALL_DISCONNECT)
         msg.attributes = [(SSTP_ATTRIB_NO_ERROR, ATTRIB_STATUS_NO_ERROR)]
-        self.sstp.transport.write(msg.dump())
+        msg.writeTo(self.sstp.transport.write)
         self.sstp.state = CALL_DISCONNECT_ACK_PENDING
         reactor.callLater(5, self.sstp.transport.loseConnection)
 
@@ -257,7 +257,7 @@ class SSTPProtocol(Protocol):
         # 3 bytes reserved + 1 byte hash bitmap (SHA-1 only) + nonce.
         ack.attributes = [(SSTP_ATTRIB_CRYPTO_BINDING_REQ,
                 '\x00\x00\x00' + '\x03' + self.nonce)]
-        self.transport.write(ack.dump())
+        ack.writeTo(self.transport.write)
         self.pppd = PPPDProtocol()
         self.pppd.sstp = self
         self.pppd.remote = self.factory.remotePool.apply()
@@ -301,7 +301,7 @@ class SSTPProtocol(Protocol):
             return
         self.state = CALL_ABORT_IN_PROGRESS_2
         msg = SSTPControlPacket(SSTP_MSG_CALL_ABORT)
-        self.transport.write(msg.dump())
+        msg.writeTo(self.transport.write)
         self.state = CALL_ABORT_PENDING
         reactor.callLater(1, self.transport.loseConnection)
 
@@ -313,7 +313,7 @@ class SSTPProtocol(Protocol):
         logging.info('Received call disconnect request.')
         self.state = CALL_DISCONNECT_IN_PROGRESS_2
         ack = SSTPControlPacket(SSTP_MSG_CALL_DISCONNECT_ACK)
-        self.transport.write(ack.dump())
+        ack.writeTo(self.transport.write)
         self.state = CALL_DISCONNECT_TIMEOUT_PENDING
         reactor.callLater(1, self.transport.loseConnection)
 
@@ -330,7 +330,7 @@ class SSTPProtocol(Protocol):
     def sstpMsgEchoRequest(self):
         if self.state == SERVER_CALL_CONNECTED:
             response = SSTPControlPacket(SSTP_MSG_ECHO_RESPONSE)
-            self.transport.write(response.dump())
+            response.writeTo(self.transport.write)
         elif self.state in (CALL_ABORT_TIMEOUT_PENDING, CALL_ABORT_PENDING,
                 CALL_DISCONNECT_ACK_PENDING, CALL_DISCONNECT_TIMEOUT_PENDING):
             return
@@ -355,7 +355,7 @@ class SSTPProtocol(Protocol):
         else:
             logging.info('Send echo request.')
             echo = SSTPControlPacket(SSTP_MSG_ECHO_REQUEST)
-            self.transport.write(echo.dump())
+            echo.writeTo(self.transport.write)
             self.helloTimer = reactor.callLater(60, self.helloTimerExpired, True)
 
 
@@ -374,7 +374,7 @@ class SSTPProtocol(Protocol):
         msg = SSTPControlPacket(SSTP_MSG_CALL_ABORT)
         if status is not None:
             msg.attributes = [(SSTP_ATTRIB_STATUS_INFO, status)]
-        self.transport.write(msg.dump())
+        msg.writeTo(self.transport.write)
         self.state = CALL_ABORT_PENDING
         reactor.callLater(3, self.transport.loseConnection)
 
