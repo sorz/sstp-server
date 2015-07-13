@@ -68,6 +68,7 @@ def main():
     args = _getArgs()
     logging.basicConfig(level=args.log_level,
             format='%(asctime)s %(levelname)-s: %(message)s')
+    logging.addLevelName(5, 'VERBOSE')
 
     ippool = IPPool(args.remote)
     ippool.register(args.local)

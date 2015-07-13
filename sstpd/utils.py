@@ -1,8 +1,12 @@
 import struct
 
 
-def hexdump():
-    pass
+class hexdump(object):
+    def __init__(self, s):
+        self.s = s
+
+    def __str__(self):
+        return self.s.encode("hex")
 
 
 def parseLength(s):

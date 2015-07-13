@@ -9,11 +9,15 @@ from packets import SSTPDataPacket, SSTPControlPacket
 from utils import hexdump, parseLength
 
 
+VERBOSE = 5  # log level
+
 class PPPDProtocol(ProcessProtocol):
     reciveBuffer = ''
     pppFrameLength = 0
 
     def outReceived(self, data):
+        logging.log(VERBOSE, "data = %s bytes, buffer = %s bytes.",
+                len(data), len(self.reciveBuffer))
         self.reciveBuffer += data
         while len(self.reciveBuffer) >= 8:
             # Get length of frame if necessary.
@@ -48,6 +52,7 @@ class PPPDProtocol(ProcessProtocol):
 
     def pppControlFrameReceived(self, frame):
         logging.debug('PPP control frame received (%s bytes).' % len(frame))
+        logging.log(VERBOSE, hexdump(frame))
         if self.sstp.state == SERVER_CALL_CONNECTED_PENDING or \
                 self.sstp.state == SERVER_CALL_CONNECTED:
             packet = SSTPDataPacket(frame)
@@ -56,6 +61,7 @@ class PPPDProtocol(ProcessProtocol):
 
     def pppDataFrameReceived(self, frame):
         logging.debug('PPP data frame received (%s bytes).' % len(frame))
+        logging.log(VERBOSE, hexdump(frame))
         if self.sstp.state == SERVER_CALL_CONNECTED:
             packet = SSTPDataPacket(frame)
             self.sstp.transport.write(packet.dump())
@@ -171,6 +177,7 @@ class SSTPProtocol(Protocol):
 
     def sstpDataPacketReceived(self, data):
         logging.debug('Forwarding SSTP data to pppd (%s bytes).' % len(data))
+        logging.log(VERBOSE, hexdump(data))
         if self.pppd is None:
             print('pppd is None.')
             return
@@ -227,6 +234,7 @@ class SSTPProtocol(Protocol):
             return
         self.nonce = os.urandom(32)
         ack = SSTPControlPacket(SSTP_MSG_CALL_CONNECT_ACK)
+        # 3 bytes reserved + 1 byte hash bitmap (SHA-1 only) + nonce.
         ack.attributes = [(SSTP_ATTRIB_CRYPTO_BINDING_REQ,
                 '\x00\x00\x00' + '\x03' + self.nonce)]
         self.transport.write(ack.dump())
@@ -256,6 +264,9 @@ class SSTPProtocol(Protocol):
             return
         self.nonce = None
         # TODO: check certHash and macHash
+        logging.log(VERBOSE, "Received cert hash: %s", certHash.encode('hex'))
+        logging.log(VERBOSE, "Received MAC hash: %s", macHash.encode('hex'))
+        logging.log(VERBOSE, "Hash type: %s", hex(ord(hashType)))
         self.state = SERVER_CALL_CONNECTED
         logging.info('Connection established.')
 
