@@ -1,18 +1,20 @@
-from struct import pack
+#include <Python.h>
 
+/* RFC 1662 
+ * C.2. 16-bit FCS Computation Method
+ * https://tools.ietf.org/html/rfc1662#appendix-C.2
+ */
 
-# Fast Frame Check Sequence (FCS) Implementation
-# https://tools.ietf.org/html/rfc1662#appendix-C
+/*
+ * u16 represents an unsigned 16-bit number.  Adjust the typedef for
+ * your hardware.
+ */
+typedef unsigned short u16;
 
-def pppfcs16(data):
-    fcs = 0xffff
-    for byte in data:
-        fcs = (fcs >> 8) ^ _fcs_table[(fcs ^ ord(byte)) & 0xff]
-    fcs ^= 0xffff
-    return pack('<H', fcs)
-
-
-_fcs_table = (
+/*
+ * FCS lookup table as calculated by the table generator.
+ */
+static u16 fcstab[256] = {
     0x0000, 0x1189, 0x2312, 0x329b, 0x4624, 0x57ad, 0x6536, 0x74bf,
     0x8c48, 0x9dc1, 0xaf5a, 0xbed3, 0xca6c, 0xdbe5, 0xe97e, 0xf8f7,
     0x1081, 0x0108, 0x3393, 0x221a, 0x56a5, 0x472c, 0x75b7, 0x643e,
@@ -45,5 +47,51 @@ _fcs_table = (
     0x6b46, 0x7acf, 0x4854, 0x59dd, 0x2d62, 0x3ceb, 0x0e70, 0x1ff9,
     0xf78f, 0xe606, 0xd49d, 0xc514, 0xb1ab, 0xa022, 0x92b9, 0x8330,
     0x7bc7, 0x6a4e, 0x58d5, 0x495c, 0x3de3, 0x2c6a, 0x1ef1, 0x0f78
-)
+};
+
+#define PPPINITFCS16     0xffff  /* Initial FCS value */
+#define PPPGOODFCS16     0xf0b8  /* Good final FCS value */
+
+/*
+ * Calculate a new fcs given the current fcs and the new data.
+ */
+u16 pppfcs16(fcs, cp, len)
+     register u16 fcs;
+     register unsigned char *cp;
+     register int len;
+{
+     while (len--)
+          fcs = (fcs >> 8) ^ fcstab[(fcs ^ *cp++) & 0xff];
+
+     return (fcs);
+}
+
+
+static PyObject *
+fcs_pppfcs16(PyObject *self, PyObject *args)
+{
+    const unsigned char* data;
+    int len;
+    u16 fcs;
+    
+    if (!PyArg_ParseTuple(args, "s#", &data, &len))
+        return NULL;
+
+    fcs = pppfcs16(PPPINITFCS16, data, len);
+    fcs ^= 0xffff;
+    fcs = ((fcs & 0x00ff) << 8) | ((fcs & 0xff00) >> 8);
+    return Py_BuildValue("I", fcs);
+}
+
+static PyMethodDef FcsMethods[] = {
+    {"pppfcs16", fcs_pppfcs16, METH_VARARGS,
+     "Caculate 16-bit FCS."},
+    {NULL, NULL, 0, NULL}
+};
+
+PyMODINIT_FUNC
+initfcs(void)
+{
+    (void) Py_InitModule("fcs", FcsMethods);
+}
 

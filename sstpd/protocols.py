@@ -28,7 +28,7 @@ class PPPDProtocol(ProcessProtocol):
             else:
                 buffer.append(byte)
 
-        buffer.extend(fcs)
+        buffer.extend(struct.pack('!H', fcs))
         buffer.append(FLAG_SEQUENCE)
         self.transport.write(str(buffer))
 
