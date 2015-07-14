@@ -43,6 +43,9 @@ def _getArgs():
             metavar='NETWORK',
             help="Address of client will be selected from it, "
                 "default to 192.168.20.0/24")
+    parser.add_argument('--ciphers',
+            metavar="CIPHER-LIST",
+            help='Custom OpenSSL cipher suite. See ciphers(1).')
     parser.add_argument('-v', '--log-level',
             default=logging.INFO, type=int,
             metavar='LOG-LEVEL',
@@ -85,8 +88,11 @@ def main():
             logging.critical('Cannot read certificate.')
             sys.exit(2)
             return
+        cert_options = certificate.options()
+        if args.ciphers:
+            cert_options.getContext().set_cipher_list(args.ciphers)
         reactor.listenSSL(args.listen_port, factory,
-                certificate.options(), interface=args.listen)
+                cert_options, interface=args.listen)
 
     logging.info('Listening on %s:%s...' % (args.listen, args.listen_port))
     reactor.run()
