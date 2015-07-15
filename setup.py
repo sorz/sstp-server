@@ -8,7 +8,7 @@ fcsmodule = Extension('sstpd.fcs', sources=['sstpd/fcsmodule.c'])
 
 setup(
     name='sstp-server',
-    version='0.2.0',
+    version='0.3.0',
     description='Secure Socket Tunneling Protocol (SSTP) VPN tunel server.',
     author='Sorz',
     author_email='orz@sorz.org',
