@@ -10,7 +10,6 @@ Requirements
 
 * Python 2.7
 * pppd
-* Linux kernel >= 2.6.0 with `CONFIG_PPP_SYNC_TTY` enabled.
 
 Install
 -------

@@ -2,17 +2,19 @@ import struct
 
 
 class SSTPPacket(object):
-    _version = '\x10'
+    _version = 0x10
 
-    def __init__(self, c, data=''):
-        self.c = c
-        self.data = data
+    def __init__(self, c, data=bytearray()):
+        self.c = c & 0x01
+        if not isinstance(data, bytearray):
+            self.data = bytearray(data)
+        else:
+            self.data = data
 
 
-    def dump(self):
-        length = struct.pack('!H', len(self.data) + 4)
-        c = chr(self.c & 0x01)
-        return self._version + c + length + self.data
+    def writeTo(self, func):
+        func(struct.pack('!BBH', self._version, self.c, len(self.data) + 4))
+        func(memoryview(self.data))
 
 
 class SSTPDataPacket(SSTPPacket):
@@ -28,12 +30,11 @@ class SSTPControlPacket(SSTPPacket):
         self.message_type = message_type
         self.attributes = attributes
 
-
-    def dump(self):
+    def writeTo(self, func):
         num_attribute = struct.pack('!H', len(self.attributes))
-        self.data = self.message_type + num_attribute
+        self.data = bytearray(self.message_type + num_attribute)
         for attr_id, attr_value in self.attributes:
             length = struct.pack('!H', len(attr_value) + 4)
-            self.data += '\x00' + attr_id + length + attr_value 
-        return super(SSTPControlPacket, self).dump()
+            self.data.extend('\x00' + attr_id + length + attr_value)
+        return super(SSTPControlPacket, self).writeTo(func)
 

@@ -1,9 +1,10 @@
 #!/usr/bin/env python2
-from setuptools import setup
+from setuptools import setup, Extension
 
 with open('README.rst') as readme:
     long_description = readme.read()
 
+fcsmodule = Extension('sstpd.fcs', sources=['sstpd/fcsmodule.c'])
 
 setup(
     name='sstp-server',
@@ -13,6 +14,7 @@ setup(
     author_email='orz@sorz.org',
     url='https://github.com/sorz/sstp-server',
     packages=['sstpd'],
+    ext_modules = [fcsmodule],
     data_files=[('', ['README.rst'])],
     entry_points="""
     [console_scripts]

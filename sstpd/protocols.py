@@ -6,45 +6,63 @@ from twisted.internet import reactor
 
 from constants import *
 from packets import SSTPDataPacket, SSTPControlPacket
+from fcs import pppfcs16
 from utils import hexdump, parseLength
 
 
 VERBOSE = 5  # log level
 
+FLAG_SEQUENCE = b'\x7e'
+CONTROL_ESCAPE = b'\x7d'
+
 class PPPDProtocol(ProcessProtocol):
-    reciveBuffer = ''
-    pppFrameLength = 0
+    frameBuffer = bytearray()
+
+    def writeFrame(self, frame):
+        fcs = pppfcs16(frame)
+        buffer = bytearray(FLAG_SEQUENCE)
+        for byte in frame:
+            if ord(byte) < 0x20 or byte in (FLAG_SEQUENCE, CONTROL_ESCAPE):
+                buffer.append(CONTROL_ESCAPE)
+                buffer.append(ord(byte) ^ 0x20)
+            else:
+                buffer.append(byte)
+
+        buffer.extend(struct.pack('!H', fcs))
+        buffer.append(FLAG_SEQUENCE)
+        self.transport.write(str(buffer))
+
 
     def outReceived(self, data):
-        logging.log(VERBOSE, "data = %s bytes, buffer = %s bytes.",
-                len(data), len(self.reciveBuffer))
-        self.reciveBuffer += data
-        while len(self.reciveBuffer) >= 8:
-            # Get length of frame if necessary.
-            if not self.pppFrameLength:
-                pppHeadLen = 4  # Address (1) + Control (1) + Protocol (2)
-                if not self.reciveBuffer.startswith('\xff\x03'):
-                    pppHeadLen -= 2  # Omit Address and Control
-                protocol = self.reciveBuffer[pppHeadLen - 2]
-                if ord(protocol) & 0x01 == 1:
-                    pppHeadLen -= 1  # Protocol-Field-Compression enabled.
-                length = self.reciveBuffer[pppHeadLen+2:pppHeadLen+4]
-                self.pppFrameLength = struct.unpack('!H', length)[0] \
-                        + pppHeadLen
-
-            if len(self.reciveBuffer) < self.pppFrameLength:
-                return
-            self.pppFrameReceived(self.reciveBuffer[:self.pppFrameLength])
-            self.reciveBuffer = self.reciveBuffer[self.pppFrameLength:]
-            self.pppFrameLength = 0
+        logging.log(VERBOSE, "Raw data: %s", hexdump(data))
+        escaped = False
+        for byte in data:
+            if escaped:
+                escaped = False
+                self.frameBuffer.append(ord(byte) ^ 0x20)
+            elif byte == CONTROL_ESCAPE:
+                escaped = True
+            elif byte == FLAG_SEQUENCE:
+                if not self.frameBuffer:
+                    continue
+                if len(self.frameBuffer) < 4:
+                    logging.warning("Invalid PPP frame received from pppd. (%s)",
+                                    hexdump(self.frameBuffer))
+                elif self.frameBuffer:
+                    del self.frameBuffer[-2:]  # Remove FCS field
+                    self.pppFrameReceived(self.frameBuffer)
+                self.frameBuffer = bytearray()
+            else:
+                self.frameBuffer.append(byte)
 
 
     def pppFrameReceived(self, frame):
+        logging.log(VERBOSE, "Frame: %s", hexdump(frame))
         if frame.startswith('\xff\x03'):
             protocol = frame[2:4]
         else:
             protocol = frame[:2]
-        if protocol[0] in '\x80\x82\xc0\xc2\xc4':
+        if protocol[0] in (0x80, 0x82, 0xc0, 0xc2, 0xc4):
             self.pppControlFrameReceived(frame)
         else:
             self.pppDataFrameReceived(frame)
@@ -56,7 +74,7 @@ class PPPDProtocol(ProcessProtocol):
         if self.sstp.state == SERVER_CALL_CONNECTED_PENDING or \
                 self.sstp.state == SERVER_CALL_CONNECTED:
             packet = SSTPDataPacket(frame)
-            self.sstp.transport.write(packet.dump())
+            packet.writeTo(self.sstp.transport.write)
 
 
     def pppDataFrameReceived(self, frame):
@@ -64,7 +82,7 @@ class PPPDProtocol(ProcessProtocol):
         logging.log(VERBOSE, hexdump(frame))
         if self.sstp.state == SERVER_CALL_CONNECTED:
             packet = SSTPDataPacket(frame)
-            self.sstp.transport.write(packet.dump())
+            packet.writeTo(self.sstp.transport.write)
 
 
     def errReceived(self, data):
@@ -87,7 +105,7 @@ class PPPDProtocol(ProcessProtocol):
         self.sstp.state = CALL_DISCONNECT_IN_PROGRESS_1
         msg = SSTPControlPacket(SSTP_MSG_CALL_DISCONNECT)
         msg.attributes = [(SSTP_ATTRIB_NO_ERROR, ATTRIB_STATUS_NO_ERROR)]
-        self.sstp.transport.write(msg.dump())
+        msg.writeTo(self.sstp.transport.write)
         self.sstp.state = CALL_DISCONNECT_ACK_PENDING
         reactor.callLater(5, self.sstp.transport.loseConnection)
 
@@ -95,7 +113,7 @@ class PPPDProtocol(ProcessProtocol):
 class SSTPProtocol(Protocol):
     state = SERVER_CALL_DISCONNECTED
     sstpPacketLength = 0
-    reciveBuffer = ''
+    receiveBuffer = ''
     nonce = None
     pppd = None
     retryCounter = 0
@@ -121,11 +139,11 @@ class SSTPProtocol(Protocol):
 
 
     def httpDataReceived(self, data):
-        self.reciveBuffer += data
-        if "\r\n\r\n" not in self.reciveBuffer:
+        self.receiveBuffer += data
+        if "\r\n\r\n" not in self.receiveBuffer:
             return
-        requestLine = self.reciveBuffer.split('\r\n')[0]
-        self.reciveBuffer = ''
+        requestLine = self.receiveBuffer.split('\r\n')[0]
+        self.receiveBuffer = ''
         method, uri, version = requestLine.split()
         if method != "SSTP_DUPLEX_POST" and version != "HTTP/1.1":
             logging.warn('Unexpected HTTP method and/or version.')
@@ -138,20 +156,20 @@ class SSTPProtocol(Protocol):
 
 
     def sstpDataReceived(self, data):
-        self.reciveBuffer += data
-        while len(self.reciveBuffer) >= 4:
+        self.receiveBuffer += data
+        while len(self.receiveBuffer) >= 4:
             # Check version.
-            if self.reciveBuffer[0] != '\x10':
+            if self.receiveBuffer[0] != '\x10':
                 logging.warn('Unsupported SSTP version.')
                 self.transport.loseConnection()
                 return
             # Get length if necessary.
             if not self.sstpPacketLength:
-                self.sstpPacketLength = parseLength(self.reciveBuffer[2:4])
-            if len(self.reciveBuffer) < self.sstpPacketLength:
+                self.sstpPacketLength = parseLength(self.receiveBuffer[2:4])
+            if len(self.receiveBuffer) < self.sstpPacketLength:
                 return
-            packet = self.reciveBuffer[:self.sstpPacketLength]
-            self.reciveBuffer = self.reciveBuffer[self.sstpPacketLength:]
+            packet = self.receiveBuffer[:self.sstpPacketLength]
+            self.receiveBuffer = self.receiveBuffer[self.sstpPacketLength:]
             self.sstpPacketLength = 0
             self.sstpPacketReceived(packet)
 
@@ -181,7 +199,7 @@ class SSTPProtocol(Protocol):
         if self.pppd is None:
             print('pppd is None.')
             return
-        self.pppd.transport.write(data)
+        self.pppd.writeFrame(data)
 
 
     def sstpControlPacketReceived(self, messageType, attributes):
@@ -237,7 +255,7 @@ class SSTPProtocol(Protocol):
         # 3 bytes reserved + 1 byte hash bitmap (SHA-1 only) + nonce.
         ack.attributes = [(SSTP_ATTRIB_CRYPTO_BINDING_REQ,
                 '\x00\x00\x00' + '\x03' + self.nonce)]
-        self.transport.write(ack.dump())
+        ack.writeTo(self.transport.write)
         self.pppd = PPPDProtocol()
         self.pppd.sstp = self
         self.pppd.remote = self.factory.remotePool.apply()
@@ -248,7 +266,7 @@ class SSTPProtocol(Protocol):
         addressArgument = '%s:%s' % (self.factory.local, self.pppd.remote)
         reactor.spawnProcess(self.pppd, self.factory.pppd,
                 args=['local', 'file', self.factory.pppdConfigFile,
-                    '115200', addressArgument, 'sync'], usePTY=True)
+                    '115200', addressArgument], usePTY=True)
         self.state = SERVER_CALL_CONNECTED_PENDING
 
 
@@ -281,7 +299,7 @@ class SSTPProtocol(Protocol):
             return
         self.state = CALL_ABORT_IN_PROGRESS_2
         msg = SSTPControlPacket(SSTP_MSG_CALL_ABORT)
-        self.transport.write(msg.dump())
+        msg.writeTo(self.transport.write)
         self.state = CALL_ABORT_PENDING
         reactor.callLater(1, self.transport.loseConnection)
 
@@ -293,7 +311,7 @@ class SSTPProtocol(Protocol):
         logging.info('Received call disconnect request.')
         self.state = CALL_DISCONNECT_IN_PROGRESS_2
         ack = SSTPControlPacket(SSTP_MSG_CALL_DISCONNECT_ACK)
-        self.transport.write(ack.dump())
+        ack.writeTo(self.transport.write)
         self.state = CALL_DISCONNECT_TIMEOUT_PENDING
         reactor.callLater(1, self.transport.loseConnection)
 
@@ -310,7 +328,7 @@ class SSTPProtocol(Protocol):
     def sstpMsgEchoRequest(self):
         if self.state == SERVER_CALL_CONNECTED:
             response = SSTPControlPacket(SSTP_MSG_ECHO_RESPONSE)
-            self.transport.write(response.dump())
+            response.writeTo(self.transport.write)
         elif self.state in (CALL_ABORT_TIMEOUT_PENDING, CALL_ABORT_PENDING,
                 CALL_DISCONNECT_ACK_PENDING, CALL_DISCONNECT_TIMEOUT_PENDING):
             return
@@ -335,7 +353,7 @@ class SSTPProtocol(Protocol):
         else:
             logging.info('Send echo request.')
             echo = SSTPControlPacket(SSTP_MSG_ECHO_REQUEST)
-            self.transport.write(echo.dump())
+            echo.writeTo(self.transport.write)
             self.helloTimer = reactor.callLater(60, self.helloTimerExpired, True)
 
 
@@ -354,7 +372,7 @@ class SSTPProtocol(Protocol):
         msg = SSTPControlPacket(SSTP_MSG_CALL_ABORT)
         if status is not None:
             msg.attributes = [(SSTP_ATTRIB_STATUS_INFO, status)]
-        self.transport.write(msg.dump())
+        msg.writeTo(self.transport.write)
         self.state = CALL_ABORT_PENDING
         reactor.callLater(3, self.transport.loseConnection)
 
