@@ -36,7 +36,7 @@ class SSTPProtocol(Protocol):
 
     def connectionLost(self, reason):
         logging.info('Connection finished.')
-        if self.pppd is not None:
+        if self.pppd is not None and self.pppd.transport is not None:
             self.pppd.transport.loseConnection()
             self.factory.remotePool.unregister(self.pppd.remote)
         if self.helloTimer.active():
@@ -172,6 +172,8 @@ class SSTPProtocol(Protocol):
         reactor.spawnProcess(self.pppd, self.factory.pppd,
                 args=['local', 'file', self.factory.pppdConfigFile,
                     '115200', addressArgument], usePTY=True)
+        self.transport.registerProducer(self.pppd, True)
+        self.pppd.resumeProducing()
         self.state = SERVER_CALL_CONNECTED_PENDING
 
 

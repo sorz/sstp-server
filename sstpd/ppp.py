@@ -1,8 +1,10 @@
 import os
 import struct
 import logging
+from zope.interface import implements
 from twisted.internet.protocol import ProcessProtocol
-from twisted.internet import reactor
+from twisted.internet.defer import DeferredQueue
+from twisted.internet import reactor, interfaces
 
 from constants import VERBOSE
 from fcs import pppfcs16
@@ -12,8 +14,30 @@ from utils import hexdump
 FLAG_SEQUENCE = b'\x7e'
 CONTROL_ESCAPE = b'\x7d'
 
+QUEUE_SIZE = 10
+
+class _ForgetfulQueue(DeferredQueue):
+    """A forgetful deferred queue.
+
+    Old object will be deleted when new one add"""
+
+    def put(self, obj):
+        if self.waiting:
+            self.waiting.pop(0).callback(obj)
+        elif self.size is None or len(self.pending) < self.size:
+            self.pending.append(obj)
+        else:
+            logging.debug('Dropping ppp frame.')
+            del self.pending[0]
+            self.pending.append(obj)
+
+
 class PPPDProtocol(ProcessProtocol):
+    implements(interfaces.IPushProducer)
+
     frameBuffer = bytearray()
+    frameQueue = _ForgetfulQueue(QUEUE_SIZE)
+    paused = False
 
     def writeFrame(self, frame):
         fcs = pppfcs16(frame)
@@ -58,10 +82,8 @@ class PPPDProtocol(ProcessProtocol):
             protocol = frame[2:4]
         else:
             protocol = frame[:2]
-        if protocol[0] in (0x80, 0x82, 0xc0, 0xc2, 0xc4):
-            self.sstp.writePPPControlFrame(frame)
-        else:
-            self.sstp.writePPPDataFrame(frame)
+
+        self.frameQueue.put((protocol, frame))
 
 
     def errReceived(self, data):
@@ -77,3 +99,35 @@ class PPPDProtocol(ProcessProtocol):
     def processEnded(self, reason):
         logging.info('pppd stopped.')
         self.sstp.pppStoped()
+
+
+    def stopProducing(self):
+        self.paused = True
+        self.transport.loseConnection()
+
+
+    def pauseProducing(self):
+        logging.debug('Pause producting')
+        self.paused = True
+
+
+    def resumeProducing(self):
+        logging.debug('Resume producing')
+        self.paused = False
+        self.readPPPFrame()
+
+
+    def readPPPFrame(self):
+        self.frameQueue.get().addCallback(self.writePPPFrame)
+
+
+    def writePPPFrame(self, protocolFrame):
+        protocol, frame = protocolFrame
+        if protocol[0] in (0x80, 0x82, 0xc0, 0xc2, 0xc4):
+            self.sstp.writePPPControlFrame(frame)
+        else:
+            self.sstp.writePPPDataFrame(frame)
+
+        if not self.paused:
+            self.readPPPFrame()  # Loop
+
