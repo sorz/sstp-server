@@ -1,113 +1,18 @@
 import os
 import struct
 import logging
-from twisted.internet.protocol import Factory, Protocol, ProcessProtocol
+from twisted.internet.protocol import Factory, Protocol
 from twisted.internet import reactor
 
 from constants import *
 from packets import SSTPDataPacket, SSTPControlPacket
-from fcs import pppfcs16
-from utils import hexdump, parseLength
+from utils import hexdump
+from ppp import PPPDProtocol
 
 
-VERBOSE = 5  # log level
-
-FLAG_SEQUENCE = b'\x7e'
-CONTROL_ESCAPE = b'\x7d'
-
-class PPPDProtocol(ProcessProtocol):
-    frameBuffer = bytearray()
-
-    def writeFrame(self, frame):
-        fcs = pppfcs16(frame)
-        buffer = bytearray(FLAG_SEQUENCE)
-        for byte in frame:
-            if ord(byte) < 0x20 or byte in (FLAG_SEQUENCE, CONTROL_ESCAPE):
-                buffer.append(CONTROL_ESCAPE)
-                buffer.append(ord(byte) ^ 0x20)
-            else:
-                buffer.append(byte)
-
-        buffer.extend(struct.pack('!H', fcs))
-        buffer.append(FLAG_SEQUENCE)
-        self.transport.write(str(buffer))
-
-
-    def outReceived(self, data):
-        logging.log(VERBOSE, "Raw data: %s", hexdump(data))
-        escaped = False
-        for byte in data:
-            if escaped:
-                escaped = False
-                self.frameBuffer.append(ord(byte) ^ 0x20)
-            elif byte == CONTROL_ESCAPE:
-                escaped = True
-            elif byte == FLAG_SEQUENCE:
-                if not self.frameBuffer:
-                    continue
-                if len(self.frameBuffer) < 4:
-                    logging.warning("Invalid PPP frame received from pppd. (%s)",
-                                    hexdump(self.frameBuffer))
-                elif self.frameBuffer:
-                    del self.frameBuffer[-2:]  # Remove FCS field
-                    self.pppFrameReceived(self.frameBuffer)
-                self.frameBuffer = bytearray()
-            else:
-                self.frameBuffer.append(byte)
-
-
-    def pppFrameReceived(self, frame):
-        logging.log(VERBOSE, "Frame: %s", hexdump(frame))
-        if frame.startswith('\xff\x03'):
-            protocol = frame[2:4]
-        else:
-            protocol = frame[:2]
-        if protocol[0] in (0x80, 0x82, 0xc0, 0xc2, 0xc4):
-            self.pppControlFrameReceived(frame)
-        else:
-            self.pppDataFrameReceived(frame)
-
-
-    def pppControlFrameReceived(self, frame):
-        logging.debug('PPP control frame received (%s bytes).' % len(frame))
-        logging.log(VERBOSE, hexdump(frame))
-        if self.sstp.state == SERVER_CALL_CONNECTED_PENDING or \
-                self.sstp.state == SERVER_CALL_CONNECTED:
-            packet = SSTPDataPacket(frame)
-            packet.writeTo(self.sstp.transport.write)
-
-
-    def pppDataFrameReceived(self, frame):
-        logging.debug('PPP data frame received (%s bytes).' % len(frame))
-        logging.log(VERBOSE, hexdump(frame))
-        if self.sstp.state == SERVER_CALL_CONNECTED:
-            packet = SSTPDataPacket(frame)
-            packet.writeTo(self.sstp.transport.write)
-
-
-    def errReceived(self, data):
-        logging.warn('Received errors from pppd.')
-        logging.warn(data)
-
-
-    def outConnectionLost(self):
-        logging.debug('pppd stdout lost.')
-        self.sstp.transport.loseConnection()
-
-
-    def processEnded(self, reason):
-        logging.info('pppd stopped.')
-        if (self.sstp.state != SERVER_CONNECT_REQUEST_PENDING and
-                self.sstp.state != SERVER_CALL_CONNECTED_PENDING and
-                self.sstp.state != SERVER_CALL_CONNECTED):
-            self.sstp.transport.loseConnection()
-            return
-        self.sstp.state = CALL_DISCONNECT_IN_PROGRESS_1
-        msg = SSTPControlPacket(SSTP_MSG_CALL_DISCONNECT)
-        msg.attributes = [(SSTP_ATTRIB_NO_ERROR, ATTRIB_STATUS_NO_ERROR)]
-        msg.writeTo(self.sstp.transport.write)
-        self.sstp.state = CALL_DISCONNECT_ACK_PENDING
-        reactor.callLater(5, self.sstp.transport.loseConnection)
+def parseLength(s):
+    s = chr(ord(s[0]) & 0x0f) + s[1]  # Ignore R
+    return struct.unpack('!H', s)[0]
 
 
 class SSTPProtocol(Protocol):
@@ -375,6 +280,37 @@ class SSTPProtocol(Protocol):
         msg.writeTo(self.transport.write)
         self.state = CALL_ABORT_PENDING
         reactor.callLater(3, self.transport.loseConnection)
+
+
+    def writePPPControlFrame(self, frame):
+        logging.debug('PPP control frame received (%s bytes).' % len(frame))
+        logging.log(VERBOSE, hexdump(frame))
+        if self.state == SERVER_CALL_CONNECTED_PENDING or \
+                self.state == SERVER_CALL_CONNECTED:
+            packet = SSTPDataPacket(frame)
+            packet.writeTo(self.transport.write)
+
+
+    def writePPPDataFrame(self, frame):
+        logging.debug('PPP data frame received (%s bytes).' % len(frame))
+        logging.log(VERBOSE, hexdump(frame))
+        if self.state == SERVER_CALL_CONNECTED:
+            packet = SSTPDataPacket(frame)
+            packet.writeTo(self.transport.write)
+
+
+    def pppStoped(self):
+        if (self.state != SERVER_CONNECT_REQUEST_PENDING and
+                self.state != SERVER_CALL_CONNECTED_PENDING and
+                self.state != SERVER_CALL_CONNECTED):
+            self.transport.loseConnection()
+            return
+        self.state = CALL_DISCONNECT_IN_PROGRESS_1
+        msg = SSTPControlPacket(SSTP_MSG_CALL_DISCONNECT)
+        msg.attributes = [(SSTP_ATTRIB_NO_ERROR, ATTRIB_STATUS_NO_ERROR)]
+        msg.writeTo(self.transport.write)
+        self.state = CALL_DISCONNECT_ACK_PENDING
+        reactor.callLater(5, self.transport.loseConnection)
 
 
 class SSTPProtocolFactory(Factory):

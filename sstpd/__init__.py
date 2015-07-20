@@ -5,7 +5,7 @@ import argparse
 from twisted.internet.endpoints import SSL4ServerEndpoint
 from twisted.internet import reactor, ssl
 
-from protocols import SSTPProtocolFactory
+from sstp import SSTPProtocolFactory
 from address import IPPool
 
 

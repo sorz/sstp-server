@@ -1,3 +1,8 @@
+# Log level
+VERBOSE = 5
+
+## Protocol related constants
+
 # State
 SERVER_CALL_DISCONNECTED = 'Server_Call_Disconnected'
 SERVER_CONNECT_REQUEST_PENDING = 'Server_Connect_Request_Pending'
