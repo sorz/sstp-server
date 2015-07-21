@@ -1,9 +1,7 @@
-import os
-import struct
 import logging
+from struct import pack
 from zope.interface import implements
 from twisted.internet.protocol import ProcessProtocol
-from twisted.internet.defer import Deferred
 from twisted.internet import reactor, interfaces
 
 from constants import VERBOSE
@@ -13,8 +11,6 @@ from utils import hexdump
 
 FLAG_SEQUENCE = b'\x7e'
 CONTROL_ESCAPE = b'\x7d'
-
-QUEUE_SIZE = 10
 
 class PPPDProtocol(ProcessProtocol):
     implements(interfaces.IPushProducer)
@@ -32,7 +28,7 @@ class PPPDProtocol(ProcessProtocol):
             else:
                 buffer.append(byte)
 
-        buffer.extend(struct.pack('!H', fcs))
+        buffer.extend(pack('!H', fcs))
         buffer.append(FLAG_SEQUENCE)
         self.transport.write(str(buffer))
 
@@ -104,11 +100,4 @@ class PPPDProtocol(ProcessProtocol):
     def resumeProducing(self):
         logging.debug('Resume producing')
         self.paused = False
-
-
-    def writePPPFrame(self, protocolFrame):
-        protocol, frame = protocolFrame
-
-        if not self.paused:
-            self.readPPPFrame()  # Loop
 
