@@ -3,7 +3,7 @@ import struct
 import logging
 from zope.interface import implements
 from twisted.internet.protocol import ProcessProtocol
-from twisted.internet.defer import DeferredQueue
+from twisted.internet.defer import Deferred
 from twisted.internet import reactor, interfaces
 
 from constants import VERBOSE
@@ -16,27 +16,10 @@ CONTROL_ESCAPE = b'\x7d'
 
 QUEUE_SIZE = 10
 
-class _ForgetfulQueue(DeferredQueue):
-    """A forgetful deferred queue.
-
-    Old object will be deleted when new one add"""
-
-    def put(self, obj):
-        if self.waiting:
-            self.waiting.pop(0).callback(obj)
-        elif self.size is None or len(self.pending) < self.size:
-            self.pending.append(obj)
-        else:
-            logging.debug('Dropping ppp frame.')
-            del self.pending[0]
-            self.pending.append(obj)
-
-
 class PPPDProtocol(ProcessProtocol):
     implements(interfaces.IPushProducer)
 
     frameBuffer = bytearray()
-    frameQueue = _ForgetfulQueue(QUEUE_SIZE)
     paused = False
 
     def writeFrame(self, frame):
@@ -78,12 +61,19 @@ class PPPDProtocol(ProcessProtocol):
 
 
     def pppFrameReceived(self, frame):
+        if self.paused:
+            logging.debug('Drop a PPP frame.')
+            return
+
         if frame.startswith('\xff\x03'):
             protocol = frame[2:4]
         else:
             protocol = frame[:2]
 
-        self.frameQueue.put((protocol, frame))
+        if protocol[0] in (0x80, 0x82, 0xc0, 0xc2, 0xc4):
+            self.sstp.writePPPControlFrame(frame)
+        else:
+            self.sstp.writePPPDataFrame(frame)
 
 
     def errReceived(self, data):
@@ -114,19 +104,10 @@ class PPPDProtocol(ProcessProtocol):
     def resumeProducing(self):
         logging.debug('Resume producing')
         self.paused = False
-        self.readPPPFrame()
-
-
-    def readPPPFrame(self):
-        self.frameQueue.get().addCallback(self.writePPPFrame)
 
 
     def writePPPFrame(self, protocolFrame):
         protocol, frame = protocolFrame
-        if protocol[0] in (0x80, 0x82, 0xc0, 0xc2, 0xc4):
-            self.sstp.writePPPControlFrame(frame)
-        else:
-            self.sstp.writePPPDataFrame(frame)
 
         if not self.paused:
             self.readPPPFrame()  # Loop
