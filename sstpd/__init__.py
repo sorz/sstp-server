@@ -57,13 +57,13 @@ def _getArgs():
 def _load_cert(path):
     if not path:
         logging.error('argument -c/--pem-cert is required')
-        return
+        sys.exit(2)
     try:
         certData = open(path).read()
     except IOError as e:
         logging.critical(e)
         logging.critical('Cannot read certificate.')
-        return
+        sys.exit(2)
     return ssl.PrivateCertificate.loadPEM(certData)
 
 
@@ -76,23 +76,25 @@ def main():
     ippool = IPPool(args.remote)
     ippool.register(args.local)
 
-    factory = SSTPProtocolFactory(pppd=args.pppd, pppdConfigFile=args.pppd_config,
-            local=args.local, remotePool=ippool)
-
     if args.no_ssl:
         logging.info('Running without SSL.')
+        factory = SSTPProtocolFactory(pppd=args.pppd, pppdConfigFile=args.pppd_config,
+                local=args.local, remotePool=ippool, certHash=None)
         reactor.listenTCP(args.listen_port, factory)
     else:
-        certificate = _load_cert(args.pem_cert)
-        if certificate is None:
-            logging.critical('Cannot read certificate.')
-            sys.exit(2)
-            return
-        cert_options = certificate.options()
+        cert = _load_cert(args.pem_cert)
+        sha1 = cert.digest('sha1').replace(':', '').decode('hex')
+        sha256 = cert.digest('sha256').replace(':', '').decode('hex')
+        cert_options = cert.options()
+
         if args.ciphers:
             cert_options.getContext().set_cipher_list(args.ciphers)
+
+        factory = SSTPProtocolFactory(pppd=args.pppd, pppdConfigFile=args.pppd_config,
+                local=args.local, remotePool=ippool, certHash=[sha1, sha256])
         reactor.listenSSL(args.listen_port, factory,
                 cert_options, interface=args.listen)
+
 
     logging.info('Listening on %s:%s...' % (args.listen, args.listen_port))
     reactor.run()

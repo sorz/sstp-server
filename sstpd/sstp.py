@@ -183,15 +183,23 @@ class SSTPProtocol(Protocol):
             return
         if self.state != SERVER_CALL_CONNECTED_PENDING:
             self.abort(ATTRIB_STATUS_UNACCEPTED_FRAME_RECEIVED)
+        # TODO: check certHash and macHash
+        logging.debug("Received cert hash: %s", certHash.encode('hex'))
+        logging.debug("Received MAC hash: %s", macHash.encode('hex'))
+        logging.debug("Hash type: %s", hex(ord(hashType)))
+
         if nonce != self.nonce:
             logging.warn('Received wrong nonce.')
             self.abort(ATTRIB_STATUS_INVALID_FRAME_RECEIVED)
             return
         self.nonce = None
-        # TODO: check certHash and macHash
-        logging.log(VERBOSE, "Received cert hash: %s", certHash.encode('hex'))
-        logging.log(VERBOSE, "Received MAC hash: %s", macHash.encode('hex'))
-        logging.log(VERBOSE, "Hash type: %s", hex(ord(hashType)))
+
+        if certHash is not None and certHash not in self.factory.certHash:
+            logging.warning("Certificate hash mismatch between server's "
+                            "and client's. Reject this connection.")
+            self.abort(ATTRIB_STATUS_INVALID_FRAME_RECEIVED)
+            return
+
         self.state = SERVER_CALL_CONNECTED
         logging.info('Connection established.')
 
@@ -318,9 +326,10 @@ class SSTPProtocol(Protocol):
 class SSTPProtocolFactory(Factory):
     protocol = SSTPProtocol
 
-    def __init__(self, pppd, pppdConfigFile, local, remotePool):
+    def __init__(self, pppd, pppdConfigFile, local, remotePool, certHash=None):
         self.pppd = pppd
         self.pppdConfigFile = pppdConfigFile
         self.local = local
         self.remotePool = remotePool
+        self.certHash = certHash
 
