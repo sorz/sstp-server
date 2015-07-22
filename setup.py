@@ -4,7 +4,7 @@ from setuptools import setup, Extension
 with open('README.rst') as readme:
     long_description = readme.read()
 
-fcsmodule = Extension('sstpd.fcs', sources=['sstpd/fcsmodule.c'])
+fcsmodule = Extension('sstpd.codec', sources=['sstpd/codecmodule.c'])
 
 setup(
     name='sstp-server',

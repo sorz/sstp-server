@@ -5,7 +5,7 @@ from twisted.internet.protocol import ProcessProtocol
 from twisted.internet import reactor, interfaces
 
 from constants import VERBOSE
-from fcs import pppfcs16
+from codec import unescape, pppfcs16
 from utils import hexdump
 
 
@@ -15,7 +15,7 @@ CONTROL_ESCAPE = b'\x7d'
 class PPPDProtocol(ProcessProtocol):
     implements(interfaces.IPushProducer)
 
-    frameBuffer = bytearray()
+    frameBuffer = b''
     paused = False
 
     def writeFrame(self, frame):
@@ -35,25 +35,10 @@ class PPPDProtocol(ProcessProtocol):
 
     def outReceived(self, data):
         logging.log(VERBOSE, "Raw data: %s", hexdump(data))
-        escaped = False
-        for byte in data:
-            if escaped:
-                escaped = False
-                self.frameBuffer.append(ord(byte) ^ 0x20)
-            elif byte == CONTROL_ESCAPE:
-                escaped = True
-            elif byte == FLAG_SEQUENCE:
-                if not self.frameBuffer:
-                    continue
-                if len(self.frameBuffer) < 4:
-                    logging.warning("Invalid PPP frame received from pppd. (%s)",
-                                    hexdump(self.frameBuffer))
-                elif self.frameBuffer:
-                    del self.frameBuffer[-2:]  # Remove FCS field
-                    self.pppFrameReceived(self.frameBuffer)
-                self.frameBuffer = bytearray()
-            else:
-                self.frameBuffer.append(byte)
+        frames, self.frameBuffer = unescape(data, self.frameBuffer)
+        logging.debug("data %s bytes => %s frames", len(data), len(frames))
+        for frame in frames:
+            self.pppFrameReceived(bytearray(frame))
 
 
     def pppFrameReceived(self, frame):
