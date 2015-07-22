@@ -138,8 +138,12 @@ codec_unescape(PyObject *self, PyObject *args)
         else if (data[i] == FLAG_SEQUENCE)
         {
             if (pos > 4)
+            {
                 // Remove 2 bytes of FCS field.
-                PyList_Append(frames, Py_BuildValue("s#", frame, pos - 2));
+                PyObject* f = Py_BuildValue("s#", frame, pos - 2);
+                PyList_Append(frames, f);
+                Py_DECREF(f);
+            }
             pos = 0;
         }
         else
