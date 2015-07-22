@@ -56,30 +56,18 @@ static u16 fcstab[256] = {
 #define FLAG_SEQUENCE    0x7e
 #define CONTROL_ESCAPE   0x7d
 
-/*
- * Calculate a new fcs given the current fcs and the new data.
- */
-u16 pppfcs16(fcs, cp, len)
-     register u16 fcs;
-     register unsigned char *cp;
-     register int len;
-{
-     while (len--)
-          fcs = (fcs >> 8) ^ fcstab[(fcs ^ *cp++) & 0xff];
 
-     return (fcs);
-}
-
-void escape_to(unsigned char byte, unsigned char* out, int* pos)
+static inline void
+escape_to(unsigned char byte, unsigned char* out, int* pos)
 {
     if (byte < 0x20 || byte == FLAG_SEQUENCE || byte == CONTROL_ESCAPE)
     {
-        out[*pos++] = CONTROL_ESCAPE;
-        out[*pos++] = byte ^ 0x20;
+        out[(*pos)++] = CONTROL_ESCAPE;
+        out[(*pos)++] = byte ^ 0x20;
     }
     else
     {
-        out[*pos++] = byte;
+        out[(*pos)++] = byte;
     }
 }
 
@@ -94,7 +82,9 @@ codec_escape(PyObject *self, PyObject *args)
 
     if (!PyArg_ParseTuple(args, "s#", &data, &data_len))
         return NULL;
-    buffer = malloc(sizeof(char[(data_len + 2) * 2]));
+    buffer = malloc(sizeof(char[(data_len + 2) * 2 + 2]));
+
+    buffer[pos++] = FLAG_SEQUENCE;
 
     int i;
     for (i=0; i<data_len; ++i)
@@ -103,29 +93,14 @@ codec_escape(PyObject *self, PyObject *args)
         escape_to(data[i], buffer, &pos);
     }
     fcs ^= 0xffff;
-    escape_to((fcs & 0x00ff) << 8, buffer, &pos);
-    escape_to((fcs & 0xff00) >> 8, buffer, &pos);
+    escape_to(fcs & 0x00ff, buffer, &pos);
+    escape_to(fcs >> 8, buffer, &pos);
+
+    buffer[pos++] = FLAG_SEQUENCE;
 
     PyObject* result = Py_BuildValue("s#", buffer, pos);
     free(buffer);
     return result;
-}
-
-
-static PyObject *
-codec_pppfcs16(PyObject *self, PyObject *args)
-{
-    const unsigned char* data;
-    int len;
-    u16 fcs;
-    
-    if (!PyArg_ParseTuple(args, "s#", &data, &len))
-        return NULL;
-
-    fcs = pppfcs16(PPPINITFCS16, data, len);
-    fcs ^= 0xffff;
-    fcs = ((fcs & 0x00ff) << 8) | ((fcs & 0xff00) >> 8);
-    return Py_BuildValue("I", fcs);
 }
 
 
@@ -151,7 +126,7 @@ codec_unescape(PyObject *self, PyObject *args)
     int i = 0;
     for (i=0; i<data_len; ++i)
     {
-        if (escaped == true)
+        if (escaped)
         {
             escaped = false;
             frame[pos++] = data[i] ^ 0x20;
@@ -165,7 +140,7 @@ codec_unescape(PyObject *self, PyObject *args)
             if (pos > 4)
                 // Remove 2 bytes of FCS field.
                 PyList_Append(frames, Py_BuildValue("s#", frame, pos - 2));
-	    pos = 0;
+            pos = 0;
         }
         else
         {
@@ -178,14 +153,16 @@ codec_unescape(PyObject *self, PyObject *args)
     return result;
 }
 
+
 static PyMethodDef CodecMethods[] = {
-    {"pppfcs16", codec_pppfcs16, METH_VARARGS,
-     "Caculate 16-bit FCS."},
     {"unescape", codec_unescape, METH_VARARGS,
      "Unescape PPP frame stream, return a list of unescaped frame and an "
      "incomplete frame (if any)."},
+    {"escape", codec_escape, METH_VARARGS,
+     "Escape a PPP frame ending with correct FCS code."},
     {NULL, NULL, 0, NULL}
 };
+
 
 PyMODINIT_FUNC
 initcodec(void)
