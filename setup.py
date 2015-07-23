@@ -8,7 +8,7 @@ fcsmodule = Extension('sstpd.codec', sources=['sstpd/codecmodule.c'])
 
 setup(
     name='sstp-server',
-    version='0.3.1',
+    version='0.3.2',
     description='Secure Socket Tunneling Protocol (SSTP) VPN server.',
     author='Sorz',
     author_email='orz@sorz.org',
