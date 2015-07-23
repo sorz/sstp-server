@@ -155,7 +155,7 @@ codec_unescape(PyObject *self, PyObject *args)
         }
     }
 
-    PyObject* result = Py_BuildValue("Os#", frames, buffer, pos);
+    PyObject* result = Py_BuildValue("Ns#", frames, buffer, pos);
     free(buffer);
     return result;
 }
