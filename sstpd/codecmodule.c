@@ -60,13 +60,11 @@ static u16 fcstab[256] = {
 static inline void
 escape_to(unsigned char byte, unsigned char* out, int* pos)
 {
-    if (byte < 0x20 || byte == FLAG_SEQUENCE || byte == CONTROL_ESCAPE)
-    {
+    if (byte < 0x20 || byte == FLAG_SEQUENCE || byte == CONTROL_ESCAPE) {
         out[(*pos)++] = CONTROL_ESCAPE;
         out[(*pos)++] = byte ^ 0x20;
     }
-    else
-    {
+    else {
         out[(*pos)++] = byte;
     }
 }
@@ -79,6 +77,7 @@ codec_escape(PyObject *self, PyObject *args)
     unsigned char* buffer;
     int pos = 0;
     u16 fcs = PPPINITFCS16;
+    int i;
 
     if (!PyArg_ParseTuple(args, "s#", &data, &data_len))
         return NULL;
@@ -86,9 +85,7 @@ codec_escape(PyObject *self, PyObject *args)
 
     buffer[pos++] = FLAG_SEQUENCE;
 
-    int i;
-    for (i=0; i<data_len; ++i)
-    {
+    for (i=0; i<data_len; ++i) {
         fcs = (fcs >> 8) ^ fcstab[(fcs ^ data[i]) & 0xff];
         escape_to(data[i], buffer, &pos);
     }
@@ -107,13 +104,15 @@ codec_escape(PyObject *self, PyObject *args)
 static PyObject *
 codec_unescape(PyObject *self, PyObject *args)
 {
-    const char* data;
-    const char* ldata;
+    const char* data; /* escaped data */
+    const char* ldata; /* last unused unescaped data */
     int data_len;
     int ldata_len;
-    char* frame;  // Frame buffer.
-    int pos;  // Length of frame.
+    char* frame; /* frame buffer */
+    int pos; /* length of frame */
     PyObject* frames = PyList_New(0);
+    bool escaped = false;
+    int i;
 
     if (!PyArg_ParseTuple(args, "s#s#", &data, &data_len, &ldata, &ldata_len))
         return NULL;
@@ -122,32 +121,24 @@ codec_unescape(PyObject *self, PyObject *args)
     strncpy(frame, ldata, ldata_len);
     pos = ldata_len;
 
-    bool escaped = false;
-    int i = 0;
-    for (i=0; i<data_len; ++i)
-    {
-        if (escaped)
-        {
+    for (i=0; i<data_len; ++i) {
+        if (escaped) {
             escaped = false;
             frame[pos++] = data[i] ^ 0x20;
         }
-        else if (data[i] == CONTROL_ESCAPE)
-        {
+        else if (data[i] == CONTROL_ESCAPE) {
             escaped = true;
         }
-        else if (data[i] == FLAG_SEQUENCE)
-        {
-            if (pos > 4)
-            {
-                // Remove 2 bytes of FCS field.
+        else if (data[i] == FLAG_SEQUENCE) {
+            if (pos > 4) {
+                /* Ignore 2-bytes FCS field */
                 PyObject* f = Py_BuildValue("s#", frame, pos - 2);
                 PyList_Append(frames, f);
                 Py_DECREF(f);
             }
             pos = 0;
         }
-        else
-        {
+        else {
             frame[pos++] = data[i];
         }
     }
@@ -173,4 +164,3 @@ initcodec(void)
 {
     (void) Py_InitModule("codec", CodecMethods);
 }
-
