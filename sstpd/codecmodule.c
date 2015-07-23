@@ -82,6 +82,8 @@ codec_escape(PyObject *self, PyObject *args)
     if (!PyArg_ParseTuple(args, "s#", &data, &data_len))
         return NULL;
     buffer = malloc(sizeof(char[(data_len + 2) * 2 + 2]));
+    if (!buffer)
+        return PyErr_NoMemory();
 
     buffer[pos++] = FLAG_SEQUENCE;
 
@@ -108,23 +110,29 @@ codec_unescape(PyObject *self, PyObject *args)
     const char* ldata; /* last unused unescaped data */
     int data_len;
     int ldata_len;
-    char* frame; /* frame buffer */
+    char* buffer; /* frame buffer */
     int pos; /* length of frame */
-    PyObject* frames = PyList_New(0);
+    PyObject* frames;
     bool escaped = false;
     int i;
 
     if (!PyArg_ParseTuple(args, "s#s#", &data, &data_len, &ldata, &ldata_len))
         return NULL;
 
-    frame = malloc(sizeof(char[data_len + ldata_len]));
-    strncpy(frame, ldata, ldata_len);
+    buffer = malloc(sizeof(char[data_len + ldata_len]));
+    if (!buffer)
+        return PyErr_NoMemory();
+    strncpy(buffer, ldata, ldata_len);
     pos = ldata_len;
+
+    frames = PyList_New(0);
+    if (!frames)
+        return NULL;
 
     for (i=0; i<data_len; ++i) {
         if (escaped) {
             escaped = false;
-            frame[pos++] = data[i] ^ 0x20;
+            buffer[pos++] = data[i] ^ 0x20;
         }
         else if (data[i] == CONTROL_ESCAPE) {
             escaped = true;
@@ -132,19 +140,23 @@ codec_unescape(PyObject *self, PyObject *args)
         else if (data[i] == FLAG_SEQUENCE) {
             if (pos > 4) {
                 /* Ignore 2-bytes FCS field */
-                PyObject* f = Py_BuildValue("s#", frame, pos - 2);
-                PyList_Append(frames, f);
-                Py_DECREF(f);
+                PyObject* frame = Py_BuildValue("s#", buffer, pos - 2);
+                if (PyList_Append(frames, frame) == -1) {
+                    Py_DECREF(frame);
+                    free(buffer);
+                    return NULL;
+                }
+                Py_DECREF(frame);
             }
             pos = 0;
         }
         else {
-            frame[pos++] = data[i];
+            buffer[pos++] = data[i];
         }
     }
 
-    PyObject* result = Py_BuildValue("Os#", frames, frame, pos);
-    free(frame);
+    PyObject* result = Py_BuildValue("Os#", frames, buffer, pos);
+    free(buffer);
     return result;
 }
 
@@ -164,3 +176,4 @@ initcodec(void)
 {
     (void) Py_InitModule("codec", CodecMethods);
 }
+
