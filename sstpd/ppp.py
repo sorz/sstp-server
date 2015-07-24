@@ -23,7 +23,7 @@ class PPPDProtocol(ProcessProtocol):
         logging.log(VERBOSE, "Raw data: %s", hexdump(data))
         frames, self.frameBuffer = unescape(data, self.frameBuffer)
         for frame in frames:
-            self.pppFrameReceived(bytearray(frame))
+            self.pppFrameReceived(frame)
 
 
     def pppFrameReceived(self, frame):
@@ -36,7 +36,7 @@ class PPPDProtocol(ProcessProtocol):
         else:
             protocol = frame[:2]
 
-        if protocol[0] in (0x80, 0x82, 0xc0, 0xc2, 0xc4):
+        if protocol[0] in ('\x80', '\x82', '\xc0', '\xc2', '\xc4'):
             self.sstp.writePPPControlFrame(frame)
         else:
             self.sstp.writePPPDataFrame(frame)
