@@ -43,6 +43,10 @@ def _getArgs():
             metavar='NETWORK',
             help="Address of client will be selected from it, "
                 "default to 192.168.20.0/24")
+    parser.add_argument('--noippool',
+            action='store_true',
+            help="Disable local ip pool managed by sstpd itself, "
+                "useful when using radius for ip assignment")
     parser.add_argument('--ciphers',
             metavar="CIPHER-LIST",
             help='Custom OpenSSL cipher suite. See ciphers(1).')
@@ -73,8 +77,11 @@ def main():
             format='%(asctime)s %(levelname)-s: %(message)s')
     logging.addLevelName(5, 'VERBOSE')
 
-    ippool = IPPool(args.remote)
-    ippool.register(args.local)
+    if not args.noippool:
+		ippool = IPPool(args.remote)
+		ippool.register(args.local)
+    else:
+		ippool = False
 
     if args.no_ssl:
         logging.info('Running without SSL.')
