@@ -172,7 +172,7 @@ class SSTPProtocol(Protocol):
         reactor.spawnProcess(self.pppd, self.factory.pppd,
                 args=['local', 'file', self.factory.pppdConfigFile,
                     '115200', addressArgument,
-                    'remotenumber', str(self.pppd.remote)], usePTY=True)
+                    'remotenumber', str(self.transport.getPeer().host)], usePTY=True)
         self.transport.registerProducer(self.pppd, True)
         self.pppd.resumeProducing()
         self.state = SERVER_CALL_CONNECTED_PENDING
