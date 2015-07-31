@@ -39,10 +39,9 @@ def _getArgs():
             metavar='ADDRESS',
             help="Address of server side on ppp, default to 192.168.20.1")
     parser.add_argument('--remote',
-            default='192.168.20.0/24',
             metavar='NETWORK',
-            help="Address of client will be selected from it, "
-                "default to 192.168.20.0/24")
+            help="Enable internal IP management. Client's IP will be selected "
+                 "from NETWORK (e.g. 192.168.20.0/24).")
     parser.add_argument('--ciphers',
             metavar="CIPHER-LIST",
             help='Custom OpenSSL cipher suite. See ciphers(1).')
@@ -73,8 +72,11 @@ def main():
             format='%(asctime)s %(levelname)-s: %(message)s')
     logging.addLevelName(5, 'VERBOSE')
 
-    ippool = IPPool(args.remote)
-    ippool.register(args.local)
+    if args.remote:
+        ippool = IPPool(args.remote)
+        ippool.register(args.local)
+    else:
+        ippool = None
 
     if args.no_ssl:
         logging.info('Running without SSL.')
@@ -94,7 +96,6 @@ def main():
                 local=args.local, remotePool=ippool, certHash=[sha1, sha256])
         reactor.listenSSL(args.listen_port, factory,
                 cert_options, interface=args.listen)
-
 
     logging.info('Listening on %s:%s...' % (args.listen, args.listen_port))
     reactor.run()
