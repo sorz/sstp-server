@@ -38,8 +38,8 @@ class SSTPProtocol(Protocol):
         logging.info('Connection finished.')
         if self.pppd is not None and self.pppd.transport is not None:
             self.pppd.transport.loseConnection()
-            if self.factory.remotePool:
-				self.factory.remotePool.unregister(self.pppd.remote)
+            if self.factory.remotePool is not None:
+                self.factory.remotePool.unregister(self.pppd.remote)
         if self.helloTimer.active():
             self.helloTimer.cancel()
 
@@ -165,13 +165,13 @@ class SSTPProtocol(Protocol):
         self.pppd = PPPDProtocol()
         self.pppd.sstp = self
         if self.factory.remotePool:
-			self.pppd.remote = self.factory.remotePool.apply()
-			if self.pppd.remote is None:
-				logging.warn('IP address pool is full. '
-						'Cannot accpet new connection.')
-				self.abort()
+            self.pppd.remote = self.factory.remotePool.apply()
+            if self.pppd.remote is None:
+                logging.warn('IP address pool is full. '
+                             'Cannot accpet new connection.')
+                self.abort()
         else:
-			self.pppd.remote = ''
+            self.pppd.remote = ''
 
         addressArgument = '%s:%s' % (self.factory.local, self.pppd.remote)
         reactor.spawnProcess(self.pppd, self.factory.pppd,
