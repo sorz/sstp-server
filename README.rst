@@ -23,10 +23,7 @@ Install from PyPI:
 Install from GitHub:
 ::
 
-    $ wget https://github.com/sorz/sstp-server/archive/master.zip
-    $ unzip master
-    $ cd sstp-server-master
-    # ./setup.py install
+    # pip install git+https://github.com/sorz/sstp-server.git
 
 
 Usage
