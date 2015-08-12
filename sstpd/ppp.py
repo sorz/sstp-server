@@ -20,7 +20,8 @@ class PPPDProtocol(ProcessProtocol):
 
 
     def outReceived(self, data):
-        logging.log(VERBOSE, "Raw data: %s", hexdump(data))
+        if __debug__:
+            logging.log(VERBOSE, "Raw data: %s", hexdump(data))
         frames, self.frameBuffer = unescape(data, self.frameBuffer)
         for frame in frames:
             self.pppFrameReceived(frame)

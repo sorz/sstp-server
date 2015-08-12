@@ -100,8 +100,9 @@ class SSTPProtocol(Protocol):
 
 
     def sstpDataPacketReceived(self, data):
-        logging.debug('Forwarding SSTP data to pppd (%s bytes).' % len(data))
-        logging.log(VERBOSE, hexdump(data))
+        if __debug__:
+            logging.debug('Forwarding SSTP data to pppd (%s bytes).' % len(data))
+            logging.log(VERBOSE, hexdump(data))
         if self.pppd is None:
             print('pppd is None.')
             return
@@ -308,8 +309,9 @@ class SSTPProtocol(Protocol):
 
 
     def writePPPDataFrame(self, frame):
-        logging.debug('PPP data frame received (%s bytes).' % len(frame))
-        logging.log(VERBOSE, hexdump(frame))
+        if __debug__:
+            logging.debug('PPP data frame received (%s bytes).' % len(frame))
+            logging.log(VERBOSE, hexdump(frame))
         if self.state == SERVER_CALL_CONNECTED:
             packet = SSTPDataPacket(frame)
             packet.writeTo(self.transport.write)
