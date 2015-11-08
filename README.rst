@@ -1,6 +1,7 @@
 sstp-server
 ============
 |PyPI version|
+|Build Status|
 
 A Secure Socket Tunneling Protocol (SSTP) server implemented by Python/Twisted.
 
@@ -60,3 +61,6 @@ Copyright (c) 2014-2015 Sorz
 
 .. |PyPI version| image:: https://img.shields.io/pypi/v/sstp-server.svg?style=flat
         :target: https://pypi.python.org/pypi/sstp-server
+
+.. |Build Status| image:: https://travis-ci.org/sorz/sstp-server.svg?branch=master
+        :target: https://travis-ci.org/sorz/sstp-server
