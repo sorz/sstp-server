@@ -8,3 +8,5 @@ before_install:
 
 install: "pip install ."
 
+script: "python tests/test.py"
+
