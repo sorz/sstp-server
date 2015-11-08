@@ -1,7 +1,7 @@
 # Certs
-*.pem
-*.crt
-*.key
+/*.pem
+/*.crt
+/*.key
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
