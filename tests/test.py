@@ -4,10 +4,10 @@ import socket
 import time
 import ssl
 
-CERT = 'tests/self-signed.pem'
-ARGS = ['python', '-m', 'sstpd', '-c', CERT, '-p', '4433',
-        '--pppd-config', 'tests/options.sstpd']
 
+CERT = 'tests/self-signed.pem'
+ARGS = ['sstpd', '-c', CERT, '-p', '4433',
+        '--pppd-config', 'tests/options.sstpd']
 
 def _ssl_connect():
     conn = socket.create_connection(('127.0.0.1', 4433))
