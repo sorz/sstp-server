@@ -1,0 +1,7 @@
+language: python
+python:
+  - "2.7"
+
+before_install: "apt-get install ppp"
+install: "pip install ."
+
