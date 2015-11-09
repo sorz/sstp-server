@@ -1,5 +1,0 @@
-name sstpd
-noauth
-nologfd
-nodefaultroute
-ms-dns 8.8.8.8
