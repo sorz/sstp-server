@@ -26,10 +26,26 @@ def _http_handshake(conn):
     assert resp.startswith(b'HTTP/1.1 200 OK')
 
 
+def _sstp_handshake(conn):
+    # SSTP_MSG_CALL_CONNECT_REQUEST
+    f = conn.makefile('rwb')
+    conn.write(b"\x10\x01\x00\x0e\x00\x01\x00\x01\x00\x01\x00\x06\x00\x01")
+    time.sleep(0.1)
+
+    # SSTP_MSG_CALL_CONNECT_ACK
+    assert conn.read(4) == b'\x10\x01\x00\x30'  # ver, C, len
+    assert conn.read(4) == b'\x00\x02\x00\x01'  # type, num attr
+    assert conn.read(4) == b'\x00\x04\x00\x28'  # attr 1
+    assert conn.read(4) == b'\x00\x00\x00\x03'  # proto bitmask
+    nonce = conn.read(32)
+    assert len(nonce) == 32
+    return nonce
+
+
 def test_connect():
     conn = _ssl_connect()
     _http_handshake(conn)
-    # TODO: SSTP handshake
+    _sstp_handshake(conn)
     # TODO: PPP handshake
 
 
@@ -39,7 +55,7 @@ def main():
     try:
         test_connect()
     finally:
-        time.sleep(1)
+        time.sleep(3)
         process.terminate()
 
 
