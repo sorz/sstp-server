@@ -3,6 +3,10 @@ language: python
 python:
   - "2.7"
 
+cache:
+  directories:
+    - $HOME/.cache/pip
+
 install: "pip install ."
 
 script: "python tests/test.py"
