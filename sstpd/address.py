@@ -6,6 +6,8 @@ class IPPool(object):
     _capacity = None
 
     def __init__(self, network):
+        if isinstance(network, str):
+            network = network.decode()
         self._network = ipaddress.ip_network(network)
         self._hosts = self._network.hosts()
 
