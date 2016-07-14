@@ -201,7 +201,8 @@ class SSTPProtocol(Protocol):
             return
         self.nonce = None
 
-        if certHash is not None and certHash not in self.factory.certHash:
+        if self.factory.certHash is not None \
+                and certHash not in self.factory.certHash:
             logging.warning("Certificate hash mismatch between server's "
                             "and client's. Reject this connection.")
             self.abort(ATTRIB_STATUS_INVALID_FRAME_RECEIVED)
