@@ -122,7 +122,7 @@ codec_unescape(PyObject *self, PyObject *args)
     buffer = malloc(sizeof(char[data_len + ldata_len]));
     if (!buffer)
         return PyErr_NoMemory();
-    strncpy(buffer, ldata, ldata_len);
+    memcpy(buffer, ldata, ldata_len);
     pos = ldata_len;
 
     frames = PyList_New(0);
