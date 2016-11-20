@@ -2,12 +2,12 @@ import ipaddress
 
 
 class IPPool(object):
-    _pool = []
-    _capacity = None
 
     def __init__(self, network):
         if isinstance(network, str):
             network = network.decode()
+        self._pool = []
+        self._capacity = None
         self._network = ipaddress.ip_network(network)
         self._hosts = self._network.hosts()
 

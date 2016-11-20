@@ -12,8 +12,10 @@ from utils import hexdump
 class PPPDProtocol(ProcessProtocol):
     implements(interfaces.IPushProducer)
 
-    frameBuffer = b''
-    paused = False
+    def __init__(self):
+        self.frameBuffer = b''
+        self.paused = False
+
 
     def writeFrame(self, frame):
         self.transport.write(escape(frame))

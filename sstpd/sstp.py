@@ -16,14 +16,14 @@ def parseLength(s):
 
 
 class SSTPProtocol(Protocol):
-    state = SERVER_CALL_DISCONNECTED
-    sstpPacketLength = 0
-    receiveBuffer = ''
-    nonce = None
-    pppd = None
-    retryCounter = 0
 
     def __init__(self):
+        self.state = SERVER_CALL_DISCONNECTED
+        self.sstpPacketLength = 0
+        self.receiveBuffer = ''
+        self.nonce = None
+        self.pppd = None
+        self.retryCounter = 0
         self.helloTimer = reactor.callLater(60, self.helloTimerExpired)
 
 
