@@ -14,6 +14,7 @@ class PPPDProtocol(ProcessProtocol):
 
     def __init__(self):
         self.frameBuffer = b''
+        self.frameEscaped = False
         self.paused = False
 
 
@@ -24,7 +25,8 @@ class PPPDProtocol(ProcessProtocol):
     def outReceived(self, data):
         if __debug__:
             logging.log(VERBOSE, "Raw data: %s", hexdump(data))
-        frames, self.frameBuffer = unescape(data, self.frameBuffer)
+        frames, self.frameBuffer, self.frameEscaped = \
+                unescape(data, self.frameBuffer, self.frameEscaped)
         for frame in frames:
             self.pppFrameReceived(frame)
 

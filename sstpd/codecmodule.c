@@ -110,14 +110,16 @@ codec_unescape(PyObject *self, PyObject *args)
     const char* ldata; /* last unused unescaped data */
     int data_len;
     int ldata_len;
+    PyObject* py_escaped;
     char* buffer; /* frame buffer */
     int pos; /* length of frame */
     PyObject* frames;
-    bool escaped = false;
+    bool escaped;
     int i;
 
-    if (!PyArg_ParseTuple(args, "s#s#", &data, &data_len, &ldata, &ldata_len))
+    if (!PyArg_ParseTuple(args, "s#s#O", &data, &data_len, &ldata, &ldata_len, &py_escaped))
         return NULL;
+    escaped = PyObject_IsTrue(py_escaped);
 
     buffer = malloc(sizeof(char[data_len + ldata_len]));
     if (!buffer)
@@ -155,7 +157,7 @@ codec_unescape(PyObject *self, PyObject *args)
         }
     }
 
-    PyObject* result = Py_BuildValue("Ns#", frames, buffer, pos);
+    PyObject* result = Py_BuildValue("Ns#O", frames, buffer, pos, escaped ? Py_True : Py_False);
     free(buffer);
     return result;
 }
