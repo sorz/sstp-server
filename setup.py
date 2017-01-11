@@ -23,7 +23,7 @@ setup(
     sstpd = sstpd:run
     """,
     install_requires=[
-        'twisted', 'service_identity', 'argparse', 'py2-ipaddress'
+        'twisted', 'service_identity', 'argparse', 'ipaddress'
     ],
     classifiers=[
         'Development Status :: 3 - Alpha',
