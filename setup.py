@@ -1,6 +1,9 @@
 #!/usr/bin/env python2
 from setuptools import setup, Extension
 
+from sstpd import __version__ as version
+
+
 with open('README.rst') as readme:
     long_description = readme.read()
 
@@ -8,16 +11,16 @@ fcsmodule = Extension('sstpd.codec', sources=['sstpd/codecmodule.c'])
 
 setup(
     name='sstp-server',
-    version='0.3.6',
+    version=version,
     description='Secure Socket Tunneling Protocol (SSTP) VPN server.',
-    author='Sorz',
-    author_email='orz@sorz.org',
+    author='Shell Chen',
+    author_email='me@sorz.org',
     url='https://github.com/sorz/sstp-server',
     packages=['sstpd'],
     ext_modules = [fcsmodule],
     entry_points="""
     [console_scripts]
-    sstpd = sstpd:main
+    sstpd = sstpd:run
     """,
     install_requires=[
         'twisted', 'service_identity', 'argparse', 'py2-ipaddress'

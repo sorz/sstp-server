@@ -1,4 +1,5 @@
 #!/usr/bin/env python2
+from __future__ import absolute_import, print_function
 import sys
 import logging
 import argparse
@@ -6,14 +7,13 @@ from ConfigParser import SafeConfigParser, NoSectionError
 from twisted.internet.endpoints import SSL4ServerEndpoint
 from twisted.internet import reactor, ssl
 
-from sstp import SSTPProtocolFactory
-from address import IPPool
+from . import __doc__
+from .sstp import SSTPProtocolFactory
+from .address import IPPool
 
 
 def _getArgs():
     conf_parser = argparse.ArgumentParser(
-            description='A Secure Socket Tunneling Protocol (SSTP) server.',
-            epilog='Author: Sorz <orz@sorz.org>.',
             add_help=False)
     conf_parser.add_argument("-f", "--conf-file",
             help="Specify config file.", metavar="FILE")
@@ -30,11 +30,12 @@ def _getArgs():
             defaults = dict(config.items(args.conf_section))
         except NoSectionError as e:
             print('Error: section [%s] not found in config file.' % \
-                  args.conf_section)
+                  args.conf_section, file=sys.stderr)
             sys.exit(1)
             return
 
-    parser = argparse.ArgumentParser(parents=[conf_parser])
+    parser = argparse.ArgumentParser(parents=[conf_parser],
+            description=__doc__)
     parser.set_defaults(**defaults)
     parser.add_argument('-l', '--listen',
             default='',
