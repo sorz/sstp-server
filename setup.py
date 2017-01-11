@@ -15,7 +15,6 @@ setup(
     url='https://github.com/sorz/sstp-server',
     packages=['sstpd'],
     ext_modules = [fcsmodule],
-    data_files=[('', ['README.rst'])],
     entry_points="""
     [console_scripts]
     sstpd = sstpd:main
