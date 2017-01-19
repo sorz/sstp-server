@@ -1,14 +1,16 @@
+from __future__ import absolute_import
 import os
 import struct
 import logging
 from twisted.internet.protocol import Factory, Protocol
 from twisted.internet import reactor
 
-from constants import *
-from packets import SSTPDataPacket, SSTPControlPacket
-from utils import hexdump
-from ppp import PPPDProtocol
-from proxy_protocol import parse_pp_header, PPException, PPNoEnoughData
+from . import __version__
+from .constants import *
+from .packets import SSTPDataPacket, SSTPControlPacket
+from .utils import hexdump
+from .ppp import PPPDProtocol
+from .proxy_protocol import parse_pp_header, PPException, PPNoEnoughData
 
 
 HTTP_REQUEST_BUFFER_SIZE = 10 * 1024
@@ -95,7 +97,7 @@ class SSTPProtocol(Protocol):
                          method, version)
         self.transport.write('HTTP/1.1 200 OK\r\n'
                 'Content-Length: 18446744073709551615\r\n'
-                'Server: sorztest/0.1\r\n\r\n')
+                'Server: SSTP-Server/%s\r\n\r\n' % __version__)
         self.state = SERVER_CONNECT_REQUEST_PENDING
 
 
