@@ -56,6 +56,9 @@ def _getArgs():
             action='store_true',
             help='Use plain HTTP instead of HTTPS. '
                  'Useful when running behind a reverse proxy.')
+    parser.add_argument('--proxy-protocol',
+            action='store_true',
+            help='Enable PROXY PROTOCOL, must use together with --no-ssl')
     parser.add_argument('--pppd',
             metavar='PPPD-FILE')
     parser.add_argument('--pppd-config',
@@ -78,6 +81,7 @@ def _getArgs():
     args = parser.parse_args()
     args.log_level = int(args.log_level)
     args.listen_port = int(args.listen_port)
+    args.proxy_protocol = args.proxy_protocol and args.no_ssl
     return args
 
 
@@ -108,8 +112,7 @@ def main():
 
     if args.no_ssl:
         logging.info('Running without SSL.')
-        factory = SSTPProtocolFactory(pppd=args.pppd, pppdConfigFile=args.pppd_config,
-                local=args.local, remotePool=ippool, certHash=None)
+        factory = SSTPProtocolFactory(args, remotePool=ippool, certHash=None)
         reactor.listenTCP(args.listen_port, factory)
     else:
         cert = _load_cert(args.pem_cert)
@@ -120,11 +123,12 @@ def main():
         if args.ciphers:
             cert_options.getContext().set_cipher_list(args.ciphers)
 
-        factory = SSTPProtocolFactory(pppd=args.pppd, pppdConfigFile=args.pppd_config,
-                local=args.local, remotePool=ippool, certHash=[sha1, sha256])
+        factory = SSTPProtocolFactory(args, remotePool=ippool, certHash=[sha1, sha256])
         reactor.listenSSL(args.listen_port, factory,
                 cert_options, interface=args.listen)
 
+    if args.proxy_protocol:
+        logging.info('PROXY PROTOCOL is activated.')
     logging.info('Listening on %s:%s...' % (args.listen, args.listen_port))
     reactor.run()
 

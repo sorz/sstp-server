@@ -8,6 +8,7 @@ from constants import *
 from packets import SSTPDataPacket, SSTPControlPacket
 from utils import hexdump
 from ppp import PPPDProtocol
+from proxy_protocol import parse_pp_header, PPException, PPNoEnoughData
 
 
 HTTP_REQUEST_BUFFER_SIZE = 10 * 1024
@@ -27,11 +28,21 @@ class SSTPProtocol(Protocol):
         self.pppd = None
         self.retryCounter = 0
         self.helloTimer = reactor.callLater(60, self.helloTimerExpired)
+        self.proxyProtocolPassed = False
+        self.remoteHost = None
+
+
+    def connectionMade(self):
+        self.proxyProtocolPassed = not self.factory.proxyProtocol
+        self.remoteHost = str(self.transport.getPeer().host)
 
 
     def dataReceived(self, data):
         if self.state == SERVER_CALL_DISCONNECTED:
-            self.httpDataReceived(data)
+            if self.proxyProtocolPassed:
+                self.httpDataReceived(data)
+            else:
+                self.proxyProtoclDataReceived(data)
         else:
             self.sstpDataReceived(data)
 
@@ -46,9 +57,26 @@ class SSTPProtocol(Protocol):
             self.helloTimer.cancel()
 
 
+    def proxyProtoclDataReceived(self, data):
+        self.receiveBuffer += data
+        try:
+            src, dest, self.receiveBuffer = parse_pp_header(self.receiveBuffer)
+        except PPNoEnoughData:
+            pass
+        except PPException as e:
+            logging.warning('PROXY PROTOCOL parsing error: %s', str(e))
+            self.transport.loseConnection()
+        else:
+            logging.debug('PROXY PROTOCOL header parsed: src %s, dest %s', src, dest)
+            self.remoteHost = src[0]
+            self.proxyProtocolPassed = True
+            if self.receiveBuffer:
+                self.dataReceived('')
+
+
     def httpDataReceived(self, data):
-        def close(msg):
-            logging.warning(msg)
+        def close(*args):
+            logging.warning(*args)
             self.transport.loseConnection()
 
         self.receiveBuffer += data
@@ -62,8 +90,9 @@ class SSTPProtocol(Protocol):
             method, uri, version = requestLine.split()
         except ValueError:
             return close('Not a valid HTTP request.')
-        if method != "SSTP_DUPLEX_POST" and version != "HTTP/1.1":
-            return close('Unexpected HTTP method and/or version.')
+        if method != "SSTP_DUPLEX_POST" or version != "HTTP/1.1":
+            return close('Unexpected HTTP method (%s) and/or version (%s).',
+                         method, version)
         self.transport.write('HTTP/1.1 200 OK\r\n'
                 'Content-Length: 18446744073709551615\r\n'
                 'Server: sorztest/0.1\r\n\r\n')
@@ -187,7 +216,7 @@ class SSTPProtocol(Protocol):
         reactor.spawnProcess(self.pppd, self.factory.pppd,
                 args=['local', 'file', self.factory.pppdConfigFile,
                     '115200', addressArgument,
-                    'remotenumber', str(self.transport.getPeer().host)], usePTY=True)
+                    'remotenumber', self.remoteHost], usePTY=True)
         self.transport.registerProducer(self.pppd, True)
         self.pppd.resumeProducing()
         self.state = SERVER_CALL_CONNECTED_PENDING
@@ -344,10 +373,11 @@ class SSTPProtocol(Protocol):
 class SSTPProtocolFactory(Factory):
     protocol = SSTPProtocol
 
-    def __init__(self, pppd, pppdConfigFile, local, remotePool, certHash=None):
-        self.pppd = pppd
-        self.pppdConfigFile = pppdConfigFile
-        self.local = local
+    def __init__(self, config, remotePool, certHash=None):
+        self.pppd = config.pppd
+        self.pppdConfigFile = config.pppd_config
+        self.local = config.local
+        self.proxyProtocol = config.proxy_protocol
         self.remotePool = remotePool
         self.certHash = certHash
 
