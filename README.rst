@@ -56,7 +56,7 @@ License
 -------
 The MIT License (MIT)
 
-Copyright (c) 2014-2016 Sorz
+Copyright (c) 2014-2017 Shell Chen
 
 
 .. |PyPI version| image:: https://img.shields.io/pypi/v/sstp-server.svg?style=flat
