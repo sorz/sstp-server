@@ -113,7 +113,7 @@ def main():
     if args.no_ssl:
         logging.info('Running without SSL.')
         factory = SSTPProtocolFactory(args, remotePool=ippool, certHash=None)
-        reactor.listenTCP(args.listen_port, factory)
+        reactor.listenTCP(args.listen_port, factory, interface=args.listen)
     else:
         cert = _load_cert(args.pem_cert)
         sha1 = cert.digest('sha1').replace(':', '').decode('hex')
