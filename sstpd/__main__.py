@@ -22,12 +22,19 @@ def _getArgs():
             metavar="SITE", default="DEFAULT")
 
     args, remaining_argv = conf_parser.parse_known_args()
-    defaults = {}
+    defaults = {
+            'listen': '',
+            'listen_port': 443,
+            'pppd': '/usr/sbin/pppd',
+            'pppd_config': '/etc/ppp/options.sstpd',
+            'local': '192.168.20.1',
+            'log_level': logging.INFO
+    }
     if args.conf_file:
         config = SafeConfigParser()
         config.read(args.conf_file)
         try:
-            defaults = dict(config.items(args.conf_section))
+            defaults.update(dict(config.items(args.conf_section)))
         except NoSectionError as e:
             print('Error: section [%s] not found in config file.' % \
                   args.conf_section, file=sys.stderr)
@@ -38,12 +45,10 @@ def _getArgs():
             description=__doc__)
     parser.set_defaults(**defaults)
     parser.add_argument('-l', '--listen',
-            default='',
             metavar='ADDRESS',
             help='The address to bind to, default to all.')
     parser.add_argument('-p', '--listen-port',
-            default=443, type=int,
-            metavar='PORT')
+            type=int, metavar='PORT')
     parser.add_argument('-c', '--pem-cert',
             metavar='PEM-FILE',
             help='The path of PEM-format certificate with key.')
@@ -52,14 +57,11 @@ def _getArgs():
             help='Use plain HTTP instead of HTTPS. '
                  'Useful when running behind a reverse proxy.')
     parser.add_argument('--pppd',
-            default='/usr/sbin/pppd',
             metavar='PPPD-FILE')
     parser.add_argument('--pppd-config',
-            default='/etc/ppp/options.sstpd',
             metavar='CONFIG-FILE',
             help='Default to /etc/ppp/options.sstpd')
     parser.add_argument('--local',
-            default='192.168.20.1',
             metavar='ADDRESS',
             help="Address of server side on ppp, default to 192.168.20.1")
     parser.add_argument('--remote',
@@ -70,11 +72,13 @@ def _getArgs():
             metavar="CIPHER-LIST",
             help='Custom OpenSSL cipher suite. See ciphers(1).')
     parser.add_argument('-v', '--log-level',
-            default=logging.INFO, type=int,
-            metavar='LOG-LEVEL',
+            type=int, metavar='LOG-LEVEL',
             help="1 to 50. Default 20, debug 10, verbose 5.")
 
-    return parser.parse_args()
+    args = parser.parse_args()
+    args.log_level = int(args.log_level)
+    args.listen_port = int(args.listen_port)
+    return args
 
 
 def _load_cert(path):
