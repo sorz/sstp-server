@@ -46,7 +46,8 @@ def _getArgs():
     parser.set_defaults(**defaults)
     parser.add_argument('-l', '--listen',
             metavar='ADDRESS',
-            help='The address to bind to, default to all.')
+            help='The address to bind to, default to all. Either IP address '
+                 'or a path start with "/" for a UNIX domain socket.')
     parser.add_argument('-p', '--listen-port',
             type=int, metavar='PORT')
     parser.add_argument('-c', '--pem-cert',
@@ -110,10 +111,18 @@ def main():
     else:
         ippool = None
 
+    on_unix_socket = args.listen.startswith('/')
+    if on_unix_socket and not args.no_ssl:
+        logging.error('Listen on UNIX doamin socket require --no-ssl.')
+        sys.exit(2)
+
     if args.no_ssl:
         logging.info('Running without SSL.')
         factory = SSTPProtocolFactory(args, remotePool=ippool, certHash=None)
-        reactor.listenTCP(args.listen_port, factory, interface=args.listen)
+        if on_unix_socket:
+            reactor.listenUNIX(args.listen, factory)
+        else:
+            reactor.listenTCP(args.listen_port, factory, interface=args.listen)
     else:
         cert = _load_cert(args.pem_cert)
         sha1 = cert.digest('sha1').replace(':', '').decode('hex')
@@ -129,7 +138,10 @@ def main():
 
     if args.proxy_protocol:
         logging.info('PROXY PROTOCOL is activated.')
-    logging.info('Listening on %s:%s...' % (args.listen, args.listen_port))
+    if on_unix_socket:
+        logging.info('Listening on %s...', args.listen)
+    else:
+        logging.info('Listening on %s:%s...', args.listen, args.listen_port)
     reactor.run()
 
 

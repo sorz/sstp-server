@@ -36,7 +36,9 @@ class SSTPProtocol(Protocol):
 
     def connectionMade(self):
         self.proxyProtocolPassed = not self.factory.proxyProtocol
-        self.remoteHost = str(self.transport.getPeer().host)
+        peer = self.transport.getPeer()
+        if hasattr(peer, 'host'):
+            self.remoteHost = str(peer.host)
 
 
     def dataReceived(self, data):
@@ -215,10 +217,11 @@ class SSTPProtocol(Protocol):
             self.pppd.remote = ''
 
         addressArgument = '%s:%s' % (self.factory.local, self.pppd.remote)
-        reactor.spawnProcess(self.pppd, self.factory.pppd,
-                args=['local', 'file', self.factory.pppdConfigFile,
-                    '115200', addressArgument,
-                    'remotenumber', self.remoteHost], usePTY=True)
+        args = ['local', 'file', self.factory.pppdConfigFile,
+                '115200', addressArgument]
+        if self.remoteHost is not None:
+            args += ['remotenumber', self.remoteHost]
+        reactor.spawnProcess(self.pppd, self.factory.pppd, args=args, usePTY=True)
         self.transport.registerProducer(self.pppd, True)
         self.pppd.resumeProducing()
         self.state = SERVER_CALL_CONNECTED_PENDING
