@@ -10,6 +10,8 @@ from utils import hexdump
 from ppp import PPPDProtocol
 
 
+HTTP_REQUEST_BUFFER_SIZE = 10 * 1024
+
 def parseLength(s):
     s = chr(ord(s[0]) & 0x0f) + s[1]  # Ignore R
     return struct.unpack('!H', s)[0]
@@ -47,6 +49,9 @@ class SSTPProtocol(Protocol):
     def httpDataReceived(self, data):
         self.receiveBuffer += data
         if "\r\n\r\n" not in self.receiveBuffer:
+            if len(self.receiveBuffer) > HTTP_REQUEST_BUFFER_SIZE:
+                logging.warning('Request too large, may not a valid HTTP request.')
+                self.transport.loseConnection()
             return
         requestLine = self.receiveBuffer.split('\r\n')[0]
         self.receiveBuffer = ''
