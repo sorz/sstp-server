@@ -47,19 +47,23 @@ class SSTPProtocol(Protocol):
 
 
     def httpDataReceived(self, data):
+        def close(msg):
+            logging.warning(msg)
+            self.transport.loseConnection()
+
         self.receiveBuffer += data
         if "\r\n\r\n" not in self.receiveBuffer:
             if len(self.receiveBuffer) > HTTP_REQUEST_BUFFER_SIZE:
-                logging.warning('Request too large, may not a valid HTTP request.')
-                self.transport.loseConnection()
+                close('Request too large, may not a valid HTTP request.')
             return
         requestLine = self.receiveBuffer.split('\r\n')[0]
         self.receiveBuffer = ''
-        method, uri, version = requestLine.split()
+        try:
+            method, uri, version = requestLine.split()
+        except ValueError:
+            return close('Not a valid HTTP request.')
         if method != "SSTP_DUPLEX_POST" and version != "HTTP/1.1":
-            logging.warn('Unexpected HTTP method and/or version.')
-            self.transport.loseConnection()
-            return
+            return close('Unexpected HTTP method and/or version.')
         self.transport.write('HTTP/1.1 200 OK\r\n'
                 'Content-Length: 18446744073709551615\r\n'
                 'Server: sorztest/0.1\r\n\r\n')
