@@ -1,3 +1,12 @@
+class SimpleEnumMeta(type):
+    """Metaclass. Add a dict `str` to allow looking up class's attribute name
+    by its value. Ideal for debugging.
+    """
+    def __new__(meta, name, bases, attrs):
+        attrs['str'] = { v: k for k, v in attrs.items()
+                         if not k.startswith('_') }
+        return super(SimpleEnumMeta, meta).__new__(meta, name, bases, attrs)
+
 # Log level
 VERBOSE = 5
 
@@ -18,15 +27,17 @@ CALL_ABORT_TIMEOUT_PENDING = 'Call_Abort_Timeout_Pending'
 CALL_ABORT_PENDING = 'Call_Abort_Timeout_Pending'
 
 # Message Type
-SSTP_MSG_CALL_CONNECT_REQUEST = '\x00\x01'
-SSTP_MSG_CALL_CONNECT_ACK = '\x00\x02'
-SSTP_MSG_CALL_CONNECT_NAK = '\x00\x03'
-SSTP_MSG_CALL_CONNECTED = '\x00\x04'
-SSTP_MSG_CALL_ABORT = '\x00\x05'
-SSTP_MSG_CALL_DISCONNECT = '\x00\x06'
-SSTP_MSG_CALL_DISCONNECT_ACK = '\x00\x07'
-SSTP_MSG_ECHO_REQUEST = '\x00\x08'
-SSTP_MSG_ECHO_RESPONSE = '\x00\x09'
+class MsgType:
+    __metaclass__ = SimpleEnumMeta
+    CALL_CONNECT_REQUEST = '\x00\x01'
+    CALL_CONNECT_ACK = '\x00\x02'
+    CALL_CONNECT_NAK = '\x00\x03'
+    CALL_CONNECTED = '\x00\x04'
+    CALL_ABORT = '\x00\x05'
+    CALL_DISCONNECT = '\x00\x06'
+    CALL_DISCONNECT_ACK = '\x00\x07'
+    ECHO_REQUEST = '\x00\x08'
+    ECHO_RESPONSE = '\x00\x09'
 
 # Attribute ID
 SSTP_ATTRIB_ENCAPSULATED_PROTOCOL_ID = '\x01'
