@@ -14,6 +14,7 @@ from .proxy_protocol import parse_pp_header, PPException, PPNoEnoughData
 
 
 HTTP_REQUEST_BUFFER_SIZE = 10 * 1024
+HELLO_TIMEOUT = 60
 
 def parseLength(s):
     s = chr(ord(s[0]) & 0x0f) + s[1]  # Ignore R
@@ -29,7 +30,8 @@ class SSTPProtocol(Protocol):
         self.nonce = None
         self.pppd = None
         self.retryCounter = 0
-        self.helloTimer = reactor.callLater(60, self.helloTimerExpired)
+        self.helloTimer = reactor.callLater(HELLO_TIMEOUT,
+                                            self.helloTimerExpired)
         self.proxyProtocolPassed = False
         self.remoteHost = None
 
@@ -123,7 +125,7 @@ class SSTPProtocol(Protocol):
 
 
     def sstpPacketReceived(self, packet):
-        self.helloTimer.reset(60)
+        self.helloTimer.reset(HELLO_TIMEOUT)
         c = ord(packet[1]) & 0x01
         if c == 0:  # Data packet
             self.sstpDataPacketReceived(packet[4:])
@@ -288,7 +290,8 @@ class SSTPProtocol(Protocol):
         elif self.state in (CALL_ABORT_PENDING, CALL_ABORT_TIMEOUT_PENDING,
                 CALL_DISCONNECT_TIMEOUT_PENDING):
             return
-        self.abort(ATTRIB_STATUS_UNACCEPTED_FRAME_RECEIVED)
+        else:
+            self.abort(ATTRIB_STATUS_UNACCEPTED_FRAME_RECEIVED)
 
 
     def sstpMsgEchoRequest(self):
@@ -298,16 +301,21 @@ class SSTPProtocol(Protocol):
         elif self.state in (CALL_ABORT_TIMEOUT_PENDING, CALL_ABORT_PENDING,
                 CALL_DISCONNECT_ACK_PENDING, CALL_DISCONNECT_TIMEOUT_PENDING):
             return
-        self.abort(ATTRIB_STATUS_UNACCEPTED_FRAME_RECEIVED)
+        else:
+            self.abort(ATTRIB_STATUS_UNACCEPTED_FRAME_RECEIVED)
 
 
     def sstpMsgEchoResponse(self):
         if self.state == SERVER_CALL_CONNECTED:
-            self.helloTimer = reactor.callLater(60, self.helloTimerExpired)
+            if self.helloTimer.active():
+                self.helloTimer.cancel()
+            self.helloTimer = reactor.callLater(HELLO_TIMEOUT,
+                                                self.helloTimerExpired)
         elif self.state in (CALL_ABORT_TIMEOUT_PENDING, CALL_ABORT_PENDING,
                 CALL_DISCONNECT_ACK_PENDING, CALL_DISCONNECT_TIMEOUT_PENDING):
             return
-        self.abort(ATTRIB_STATUS_UNACCEPTED_FRAME_RECEIVED)
+        else:
+            self.abort(ATTRIB_STATUS_UNACCEPTED_FRAME_RECEIVED)
 
 
     def helloTimerExpired(self, close=False):
@@ -320,7 +328,8 @@ class SSTPProtocol(Protocol):
             logging.info('Send echo request.')
             echo = SSTPControlPacket(SSTP_MSG_ECHO_REQUEST)
             echo.writeTo(self.transport.write)
-            self.helloTimer = reactor.callLater(60, self.helloTimerExpired, True)
+            self.helloTimer = reactor.callLater(HELLO_TIMEOUT,
+                                                self.helloTimerExpired, True)
 
 
     def addRetryCounterOrAbrot(self):
