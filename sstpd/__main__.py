@@ -51,8 +51,12 @@ def _getArgs():
     parser.add_argument('-p', '--listen-port',
             type=int, metavar='PORT')
     parser.add_argument('-c', '--pem-cert',
-            metavar='PEM-FILE',
-            help='The path of PEM-format certificate with key.')
+            metavar='PEM-CERT',
+            help='Path of PEM-format certificate.')
+    parser.add_argument('-k', '--pem-key',
+            metavar='PEM-KEY',
+            help='Path of private key file if separated from the '
+                 'certificate file.')
     parser.add_argument('-n', '--no-ssl',
             action='store_true',
             help='Use plain HTTP instead of HTTPS. '
@@ -86,17 +90,18 @@ def _getArgs():
     return args
 
 
-def _load_cert(path):
-    if not path:
+def _load_cert(certPath, keyPath=None):
+    if not certPath:
         logging.error('argument -c/--pem-cert is required')
         sys.exit(2)
     try:
-        certData = open(path).read()
+        certData = open(certPath).read()
+        keyData = open(keyPath).read() if keyPath else b''
     except IOError as e:
         logging.critical(e)
         logging.critical('Cannot read certificate.')
         sys.exit(2)
-    return ssl.PrivateCertificate.loadPEM(certData)
+    return ssl.PrivateCertificate.loadPEM(certData + keyData)
 
 
 def main():
@@ -124,7 +129,7 @@ def main():
         else:
             reactor.listenTCP(args.listen_port, factory, interface=args.listen)
     else:
-        cert = _load_cert(args.pem_cert)
+        cert = _load_cert(args.pem_cert, args.pem_key)
         sha1 = cert.digest('sha1').replace(':', '').decode('hex')
         sha256 = cert.digest('sha256').replace(':', '').decode('hex')
         cert_options = cert.options()
