@@ -1,7 +1,9 @@
+import os
 import logging
 from struct import pack
 from zope.interface import implements
 from twisted.internet.protocol import ProcessProtocol
+from twisted.internet.main import CONNECTION_LOST
 from twisted.internet import reactor, interfaces
 
 from constants import VERBOSE
@@ -18,36 +20,37 @@ class PPPDProtocol(ProcessProtocol):
         self.paused = False
         self.sync = sync
 
+    def connectionMade(self):
+        if self.sync:
+            # Patch to PTYProcess
+            self.transport.doRead = self.syncDoRead
+
+    def syncDoRead(self):
+        # Copy from twisted.internet.fdesc.readFromFD()
+        try:
+            # Origin is 8192, change to the max size of a PPP frame here.
+            # It's 1401 on my system, may differ on other environment?
+            output = os.read(self.transport.fd, 1401)
+        except (OSError, IOError) as ioe:
+            if ioe.args[0] in (errno.EAGAIN, errno.EINTR):
+                return
+            else:
+                return CONNECTION_LOST
+        if not output:
+            return CONNECTION_DONE
+        self.childDataReceived(1, output)
 
     def writeFrame(self, frame):
         if self.sync:
-            self.transport.write(frame)
+            self.transport.writeSomeData(frame)
         else:
             self.transport.write(escape(frame))
 
-
     def outReceived(self, data):
         if __debug__:
-            logging.log(VERBOSE, "Raw data: %s", hexdump(data))
+            logging.log(VERBOSE, "Raw data (%d bytes): %s", len(data), hexdump(data))
         if self.sync:
-            data = self.frameBuffer + data
-            self.frameBuffer = b''
-            start = 0
-            while start < len(data):
-                if data[start] == '\xff':
-                    length = ord(data[start+6]) << 8 | ord(data[start+7])
-                    length += 4
-                elif data[start] not in ('\xff', '\x80', '\x82', '\xc0', '\xc2', '\xc4'):
-                    length = ord(data[start+3]) << 8 | ord(data[start+4])
-                    length += 1  # proto no. on first byte
-                    #logging.info("length: %s", length)
-                else:
-                    length = len(data) - start
-                if start + length <= len(data):
-                    self.pppFrameReceived(data[start:start+length])
-                else:
-                    self.frameBuffer = data[start:]
-                start += length
+            self.pppFrameReceived(data)
         else:
             frames, self.frameBuffer, self.frameEscaped = \
                     unescape(data, self.frameBuffer, self.frameEscaped)
