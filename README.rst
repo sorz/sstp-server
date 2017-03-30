@@ -45,7 +45,12 @@ A example:
 Start server:
 ::
 
-    # sstpd -p 443 -c cert.pem --local 10.0.0.1 --remote 10.0.0.0/24
+    # sstpd -p 443 -c cert.pem -k key.pem --local 10.0.0.1 --remote 10.0.0.0/24
+
+Or:
+::
+
+    # sstpd -f /path/to/sstpd-server.ini -s site1
 
 Known Issues
 ------------
