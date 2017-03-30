@@ -28,6 +28,7 @@ def _getArgs():
             'pppd': '/usr/sbin/pppd',
             'pppd_config': '/etc/ppp/options.sstpd',
             'local': '192.168.20.1',
+            'sync': False,
             'log_level': logging.INFO
     }
     if args.conf_file:
@@ -75,6 +76,9 @@ def _getArgs():
     parser.add_argument('--ciphers',
             metavar="CIPHER-LIST",
             help='Custom OpenSSL cipher suite. See ciphers(1).')
+    parser.add_argument('--sync',
+            action='store_true',
+            help="Enable Synchronous HDLC.")
     parser.add_argument('-v', '--log-level',
             type=int, metavar='LOG-LEVEL',
             help="1 to 50. Default 20, debug 10, verbose 5.")

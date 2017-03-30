@@ -208,7 +208,7 @@ class SSTPProtocol(Protocol):
         ack.attributes = [(SSTP_ATTRIB_CRYPTO_BINDING_REQ,
                 '\x00\x00\x00' + '\x03' + self.nonce)]
         ack.writeTo(self.transport.write)
-        self.pppd = PPPDProtocol()
+        self.pppd = PPPDProtocol(self.factory.syncMode)
         self.pppd.sstp = self
         if self.factory.remotePool:
             self.pppd.remote = self.factory.remotePool.apply()
@@ -224,6 +224,8 @@ class SSTPProtocol(Protocol):
                 '115200', addressArgument]
         if self.remoteHost is not None:
             args += ['remotenumber', self.remoteHost]
+        if self.factory.syncMode:
+            args += ['sync']
         reactor.spawnProcess(self.pppd, self.factory.pppd, args=args, usePTY=True)
         self.transport.registerProducer(self.pppd, True)
         self.pppd.resumeProducing()
@@ -395,4 +397,5 @@ class SSTPProtocolFactory(Factory):
         self.proxyProtocol = config.proxy_protocol
         self.remotePool = remotePool
         self.certHash = certHash
+        self.syncMode = config.sync
 
