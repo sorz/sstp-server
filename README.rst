@@ -48,11 +48,13 @@ A example:
         ms-dns 8.8.4.4
 
 Start server:
+
 .. code:: bash
 
     sudo sstpd -p 443 -c cert.pem -k key.pem --local 10.0.0.1 --remote 10.0.0.0/24
 
 Or:
+
 .. code:: bash
 
     sudo sstpd -f /path/to/sstpd-server.ini -s site1
