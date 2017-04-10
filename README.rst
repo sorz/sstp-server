@@ -27,6 +27,11 @@ Install from GitHub:
     # pip install git+https://github.com/sorz/sstp-server.git
 
 
+Arch Linux user may install
+`sstp-server <https://aur.archlinux.org/packages/sstp-server/>`_
+package from AUR.
+
+
 Usage
 -----
 
@@ -43,19 +48,20 @@ A example:
         ms-dns 8.8.4.4
 
 Start server:
-::
+.. code:: bash
 
-    # sstpd -p 443 -c cert.pem -k key.pem --local 10.0.0.1 --remote 10.0.0.0/24
+    sudo sstpd -p 443 -c cert.pem -k key.pem --local 10.0.0.1 --remote 10.0.0.0/24
 
 Or:
-::
+.. code:: bash
 
-    # sstpd -f /path/to/sstpd-server.ini -s site1
+    sudo sstpd -f /path/to/sstpd-server.ini -s site1
 
 Known Issues
 ------------
 
-Not yet implement *Crypto Binding*. It may be vulnerable by MITM attack.
+- Not implemented *Crypto Binding* yet. Potential MITM attack risk exists.
+- High CPU usage, may not suitable for high thougthput applications.
 
 License
 -------
