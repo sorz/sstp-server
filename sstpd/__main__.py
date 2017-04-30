@@ -1,18 +1,19 @@
-#!/usr/bin/env python2
-from __future__ import absolute_import, print_function
+#!/usr/bin/env python3
+import os
 import sys
 import logging
 import argparse
-from ConfigParser import SafeConfigParser, NoSectionError
-from twisted.internet.endpoints import SSL4ServerEndpoint
-from twisted.internet import reactor, ssl
+from configparser import SafeConfigParser, NoSectionError
+import ssl
+import asyncio
+import socket
 
 from . import __doc__
 from .sstp import SSTPProtocolFactory
 from .address import IPPool
 
 
-def _getArgs():
+def _get_args():
     conf_parser = argparse.ArgumentParser(
             add_help=False)
     conf_parser.add_argument("-f", "--conf-file",
@@ -90,22 +91,23 @@ def _getArgs():
     return args
 
 
-def _load_cert(certPath, keyPath=None):
-    if not certPath:
+def _load_cert(cert_path, key_path=None):
+    if not cert_path:
         logging.error('argument -c/--pem-cert is required')
         sys.exit(2)
+    context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
     try:
-        certData = open(certPath).read()
-        keyData = open(keyPath).read() if keyPath else b''
+        context.load_cert_chain(certfile=cert_path,
+                                keyfile=key_path if key_path else cert_path)
     except IOError as e:
         logging.critical(e)
         logging.critical('Cannot read certificate.')
         sys.exit(2)
-    return ssl.PrivateCertificate.loadPEM(certData + keyData)
+    return context
 
 
 def main():
-    args = _getArgs()
+    args = _get_args()
     logging.basicConfig(level=args.log_level,
             format='%(asctime)s %(levelname)-s: %(message)s')
     logging.addLevelName(5, 'VERBOSE')
@@ -121,25 +123,35 @@ def main():
         logging.error('Listen on UNIX doamin socket require --no-ssl.')
         sys.exit(2)
 
+    loop = asyncio.get_event_loop()
+
+    cert_hash = None
+    sock = None
     if args.no_ssl:
+        ssl_ctx = None
         logging.info('Running without SSL.')
-        factory = SSTPProtocolFactory(args, remotePool=ippool, certHash=None)
         if on_unix_socket:
-            reactor.listenUNIX(args.listen, factory)
-        else:
-            reactor.listenTCP(args.listen_port, factory, interface=args.listen)
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            sock.bind(args.listen)
     else:
-        cert = _load_cert(args.pem_cert, args.pem_key)
-        sha1 = cert.digest('sha1').replace(':', '').decode('hex')
-        sha256 = cert.digest('sha256').replace(':', '').decode('hex')
-        cert_options = cert.options()
-
+        ssl_ctx = _load_cert(args.pem_cert, args.pem_key)
         if args.ciphers:
-            cert_options.getContext().set_cipher_list(args.ciphers)
+            ssl_ctx.set_ciphers(args.ciphers)
+        #sha1 = cert.digest('sha1').replace(':', '').decode('hex')
+        #sha256 = cert.digest('sha256').replace(':', '').decode('hex')
+        # TODO: set cert hash on cert_hash[sha1, sha256]
 
-        factory = SSTPProtocolFactory(args, remotePool=ippool, certHash=[sha1, sha256])
-        reactor.listenSSL(args.listen_port, factory,
-                cert_options, interface=args.listen)
+    factory = SSTPProtocolFactory(args, remote_pool=ippool, cert_hash=cert_hash)
+    if sock is None:
+        coro = loop.create_server(factory,
+                                  args.listen,
+                                  args.listen_port,
+                                  ssl=ssl_ctx)
+    else:
+        coro = loop.create_server(factory, None, None, sock=sock)
+    server = loop.run_until_complete(coro)
+    factory()  # test
+
 
     if args.proxy_protocol:
         logging.info('PROXY PROTOCOL is activated.')
@@ -147,8 +159,13 @@ def main():
         logging.info('Listening on %s...', args.listen)
     else:
         logging.info('Listening on %s:%s...', args.listen, args.listen_port)
-    reactor.run()
-
+    try:
+        loop.run_forever()
+    finally:
+        loop.close()
+        if on_unix_socket and os.path.exists(args.listen):
+            os.remove(args.listen)
 
 if __name__ == '__main__':
     main()
+
