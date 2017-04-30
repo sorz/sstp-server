@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
-import os
 import sys
 import logging
 import argparse
 from configparser import SafeConfigParser, NoSectionError
 import ssl
 import asyncio
-import socket
 
 from . import __doc__
 from .sstp import SSTPProtocolFactory
@@ -118,21 +116,10 @@ def main():
     else:
         ippool = None
 
-    on_unix_socket = args.listen.startswith('/')
-    if on_unix_socket and not args.no_ssl:
-        logging.error('Listen on UNIX doamin socket require --no-ssl.')
-        sys.exit(2)
-
-    loop = asyncio.get_event_loop()
-
-    cert_hash = None
-    sock = None
     if args.no_ssl:
         ssl_ctx = None
+        cert_hash = None
         logging.info('Running without SSL.')
-        if on_unix_socket:
-            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            sock.bind(args.listen)
     else:
         ssl_ctx = _load_cert(args.pem_cert, args.pem_key)
         if args.ciphers:
@@ -140,18 +127,24 @@ def main():
         #sha1 = cert.digest('sha1').replace(':', '').decode('hex')
         #sha256 = cert.digest('sha256').replace(':', '').decode('hex')
         # TODO: set cert hash on cert_hash[sha1, sha256]
+        cert_hash = None
+    on_unix_socket = args.listen.startswith('/')
 
-    factory = SSTPProtocolFactory(args, remote_pool=ippool, cert_hash=cert_hash)
-    if sock is None:
+    loop = asyncio.get_event_loop()
+    factory = SSTPProtocolFactory(args,
+                                  remote_pool=ippool,
+                                  cert_hash=cert_hash)
+    if on_unix_socket:
+        coro = loop.create_unix_server(factory,
+                                       args.listen,
+                                       ssl=ssl_ctx)
+    else:
         coro = loop.create_server(factory,
                                   args.listen,
                                   args.listen_port,
                                   ssl=ssl_ctx)
-    else:
-        coro = loop.create_server(factory, None, None, sock=sock)
     server = loop.run_until_complete(coro)
     factory()  # test
-
 
     if args.proxy_protocol:
         logging.info('PROXY PROTOCOL is activated.')
@@ -163,8 +156,6 @@ def main():
         loop.run_forever()
     finally:
         loop.close()
-        if on_unix_socket and os.path.exists(args.listen):
-            os.remove(args.listen)
 
 if __name__ == '__main__':
     main()
