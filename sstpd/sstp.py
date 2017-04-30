@@ -7,9 +7,9 @@ from functools import partial
 
 from . import __version__
 from .constants import *
-#from .packets import SSTPDataPacket, SSTPControlPacket
+from .packets import SSTPDataPacket, SSTPControlPacket
 from .utils import hexdump
-#from .ppp import PPPDProtocol
+from .ppp import PPPDProtocol, PPPDProtocolFactory
 #from .proxy_protocol import parse_pp_header, PPException, PPNoEnoughData
 
 
@@ -17,8 +17,7 @@ HTTP_REQUEST_BUFFER_SIZE = 10 * 1024
 HELLO_TIMEOUT = 60
 
 def parse_length(s):
-    s = chr(ord(s[0]) & 0x0f) + s[1]  # Ignore R
-    return struct.unpack('!H', s)[0]
+    return ((s[0] & 0x0f) << 8) + s[1]  # Ignore R
 
 
 class SSTPProtocol(Protocol):
@@ -110,7 +109,7 @@ class SSTPProtocol(Protocol):
         self.receive_buf += data
         while len(self.receive_buf) >= 4:
             # Check version.
-            if self.receive_buf[0] != '\x10':
+            if self.receive_buf[0] != 0x10:
                 logging.warn('Unsupported SSTP version.')
                 self.transport.close()
                 return
@@ -127,7 +126,7 @@ class SSTPProtocol(Protocol):
 
     def sstp_packet_received(self, packet):
         self.reset_hello_timer()
-        c = ord(packet[1]) & 0x01
+        c = packet[1] & 0x01
         if c == 0:  # Data packet
             self.sstp_data_packet_received(packet[4:])
         else:  # Control packet
@@ -151,7 +150,7 @@ class SSTPProtocol(Protocol):
         if self.pppd is None:
             print('pppd is None.')
             return
-        self.pppd.writeFrame(data)
+        self.pppd.write_frame(data)
 
 
     def sstp_control_packet_received(self, messageType, attributes):
@@ -207,29 +206,38 @@ class SSTPProtocol(Protocol):
         ack = SSTPControlPacket(MsgType.CALL_CONNECT_ACK)
         # 3 bytes reserved + 1 byte hash bitmap (SHA-1 only) + nonce.
         ack.attributes = [(SSTP_ATTRIB_CRYPTO_BINDING_REQ,
-                '\x00\x00\x00' + '\x03' + self.nonce)]
+                b'\x00\x00\x00' + b'\x03' + self.nonce)]
         ack.writeTo(self.transport.write)
-        self.pppd = PPPDProtocol()
-        self.pppd.sstp = self
+
+        remote = ''
         if self.factory.remote_pool:
-            self.pppd.remote = self.factory.remote_pool.apply()
-            if self.pppd.remote is None:
+            remote = self.factory.remote_pool.apply()
+            if remote is None:
                 logging.warn('IP address pool is full. '
                              'Cannot accpet new connection.')
                 self.abort()
-        else:
-            self.pppd.remote = ''
 
-        addressArgument = '%s:%s' % (self.factory.local, self.pppd.remote)
-        args = ['local', 'file', self.factory.pppd_config_file,
-                '115200', addressArgument]
+        address_argument = '%s:%s' % (self.factory.local, remote)
+        args = ['notty', 'file', self.factory.pppd_config_file,
+                '115200', address_argument]
         if self.remote_host is not None:
             args += ['remotenumber', self.remote_host]
-        reactor.spawnProcess(self.pppd, self.factory.pppd, args=args, usePTY=True)
-        self.transport.registerProducer(self.pppd, True)
-        self.pppd.resumeProducing()
+
+        factory = PPPDProtocolFactory(callback=self, remote=remote)
+        coro = self.loop.subprocess_exec(factory, self.factory.pppd, *args)
+        task = asyncio.ensure_future(coro)
+        task.add_done_callback(self.pppd_started)
         self.state = SERVER_CALL_CONNECTED_PENDING
 
+    def pppd_started(self, task):
+        err = task.exception()
+        if err is not None:
+            logging.warning("Fail to start pppd: %s", err)
+            self.abort()
+            return
+        transport, protocol = task.result()
+        self.pppd = protocol
+        self.pppd.resume_producing()
 
     def sstp_call_connected_received(self, hashType, nonce, cert_hash, macHash):
         if self.state in (CALL_ABORT_TIMEOUT_PENDING, CALL_ABORT_PENDING,
@@ -265,13 +273,13 @@ class SSTPProtocol(Protocol):
             return
         logging.warn("Call abort.")
         if self.state == CALL_ABORT_PENDING:
-            reactor.callLater(1, self.transport.loseConnection)
+            self.loop.call_later(1, self.transport.close)
             return
         self.state = CALL_ABORT_IN_PROGRESS_2
         msg = SSTPControlPacket(MsgType.CALL_ABORT)
         msg.writeTo(self.transport.write)
         self.state = CALL_ABORT_PENDING
-        reactor.callLater(1, self.transport.loseConnection)
+        self.loop.call_later(1, self.transport.close)
 
 
     def sstp_msg_call_disconnect(self, status=None):
@@ -283,8 +291,7 @@ class SSTPProtocol(Protocol):
         ack = SSTPControlPacket(MsgType.CALL_DISCONNECT_ACK)
         ack.writeTo(self.transport.write)
         self.state = CALL_DISCONNECT_TIMEOUT_PENDING
-        reactor.callLater(1, self.transport.loseConnection)
-
+        self.loop.call_later(1, self.transport.close)
 
     def sstp_msg_call_disconnect_ack(self):
         if self.state == CALL_DISCONNECT_ACK_PENDING:
@@ -351,7 +358,7 @@ class SSTPProtocol(Protocol):
             msg.attributes = [(SSTP_ATTRIB_STATUS_INFO, status)]
         msg.writeTo(self.transport.write)
         self.state = CALL_ABORT_PENDING
-        reactor.callLater(3, self.transport.loseConnection)
+        self.loop.call_later(3, self.transport.close)
 
 
     def write_ppp_control_frame(self, frame):
@@ -383,7 +390,7 @@ class SSTPProtocol(Protocol):
         msg.attributes = [(SSTP_ATTRIB_NO_ERROR, ATTRIB_STATUS_NO_ERROR)]
         msg.writeTo(self.transport.write)
         self.state = CALL_DISCONNECT_ACK_PENDING
-        reactor.callLater(5, self.transport.loseConnection)
+        self.loop.call_later(3, self.transport.close)
 
 
 class SSTPProtocolFactory:
