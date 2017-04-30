@@ -3,7 +3,7 @@ from struct import pack
 import asyncio
 
 from .constants import VERBOSE
-#from .codec import unescape, escape
+from .codec import unescape, escape
 from .utils import hexdump
 
 
@@ -40,11 +40,7 @@ class PPPDProtocol(asyncio.SubprocessProtocol):
             self.ppp_frame_received(frame)
 
     def ppp_frame_received(self, frame):
-        if self.paused:
-            logging.debug('Drop a PPP frame.')
-            return
-
-        if frame.startswith('\xff\x03'):
+        if frame.startswith(b'\xff\x03'):
             protocol = frame[2:4]
         else:
             protocol = frame[:2]
@@ -58,8 +54,8 @@ class PPPDProtocol(asyncio.SubprocessProtocol):
         logging.warn('Received errors from pppd.')
         logging.warn(data)
 
-    def pipe_connection_lost(self, fd):
-        logging.debug('pppd stdin/out lost.')
+    def pipe_connection_lost(self, fd, err):
+        logging.debug('pppd stdin/out lost: %s', err)
         self.transport.close()
 
     def process_exited(self):

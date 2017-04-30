@@ -79,7 +79,7 @@ codec_escape(PyObject *self, PyObject *args)
     u16 fcs = PPPINITFCS16;
     int i;
 
-    if (!PyArg_ParseTuple(args, "s#", &data, &data_len))
+    if (!PyArg_ParseTuple(args, "y#", &data, &data_len))
         return NULL;
     buffer = malloc(sizeof(char[(data_len + 2) * 2 + 2]));
     if (!buffer)
@@ -97,7 +97,7 @@ codec_escape(PyObject *self, PyObject *args)
 
     buffer[pos++] = FLAG_SEQUENCE;
 
-    PyObject* result = Py_BuildValue("s#", buffer, pos);
+    PyObject* result = Py_BuildValue("y#", buffer, pos);
     free(buffer);
     return result;
 }
@@ -117,7 +117,7 @@ codec_unescape(PyObject *self, PyObject *args)
     bool escaped;
     int i;
 
-    if (!PyArg_ParseTuple(args, "s#s#O", &data, &data_len, &ldata, &ldata_len, &py_escaped))
+    if (!PyArg_ParseTuple(args, "y#y#O", &data, &data_len, &ldata, &ldata_len, &py_escaped))
         return NULL;
     escaped = PyObject_IsTrue(py_escaped);
 
@@ -142,7 +142,7 @@ codec_unescape(PyObject *self, PyObject *args)
         else if (data[i] == FLAG_SEQUENCE) {
             if (pos > 4) {
                 /* Ignore 2-bytes FCS field */
-                PyObject* frame = Py_BuildValue("s#", buffer, pos - 2);
+                PyObject* frame = Py_BuildValue("y#", buffer, pos - 2);
                 if (PyList_Append(frames, frame) == -1) {
                     Py_DECREF(frame);
                     free(buffer);
@@ -157,7 +157,7 @@ codec_unescape(PyObject *self, PyObject *args)
         }
     }
 
-    PyObject* result = Py_BuildValue("Ns#O", frames, buffer, pos, escaped ? Py_True : Py_False);
+    PyObject* result = Py_BuildValue("Ny#O", frames, buffer, pos, escaped ? Py_True : Py_False);
     free(buffer);
     return result;
 }
@@ -173,9 +173,17 @@ static PyMethodDef CodecMethods[] = {
 };
 
 
+static struct PyModuleDef codecmodule = {
+    PyModuleDef_HEAD_INIT,
+    "codec", /* name of module */
+    NULL,    /* module documentation */
+    -1,      /* keep state in global variables */
+    CodecMethods
+};
+
 PyMODINIT_FUNC
-initcodec(void)
+PyInit_codec(void)
 {
-    (void) Py_InitModule("codec", CodecMethods);
+    (void) PyModule_Create(&codecmodule);
 }
 
