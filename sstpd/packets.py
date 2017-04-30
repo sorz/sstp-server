@@ -4,7 +4,7 @@ import struct
 class SSTPPacket(object):
     _version = 0x10
 
-    def __init__(self, c, data=''):
+    def __init__(self, c, data=b''):
         self.c = c & 0x01
         self.data = data
 
@@ -32,6 +32,6 @@ class SSTPControlPacket(SSTPPacket):
         self.data = self.message_type + num_attribute
         for attr_id, attr_value in self.attributes:
             length = struct.pack('!H', len(attr_value) + 4)
-            self.data += '\x00' + attr_id + length + attr_value
+            self.data += b'\x00' + attr_id + length + attr_value
         return super(SSTPControlPacket, self).writeTo(func)
 

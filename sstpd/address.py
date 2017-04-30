@@ -1,11 +1,9 @@
 import ipaddress
 
 
-class IPPool(object):
+class IPPool:
 
     def __init__(self, network):
-        if isinstance(network, str):
-            network = network.decode()
         self._pool = []
         self._capacity = None
         self._network = ipaddress.ip_network(network)
@@ -20,8 +18,6 @@ class IPPool(object):
 
 
     def register(self, address):
-        if isinstance(address, str):
-            address = address.decode()
         addr = ipaddress.ip_address(address)
         if addr in self._pool:
             raise RegisteredException()
@@ -47,8 +43,6 @@ class IPPool(object):
 
 
     def unregister(self, address):
-        if isinstance(address, str):
-            address = address.decode()
         addr = ipaddress.ip_address(address)
         try:
             self._pool.remove(addr)

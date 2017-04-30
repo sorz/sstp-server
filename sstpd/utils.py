@@ -1,12 +1,11 @@
-import struct
+import binascii
 
-
-class hexdump(object):
+class hexdump:
     def __init__(self, s):
         self.s = s
 
     def __str__(self):
-        return str(self.s).encode("hex")
+        return binascii.hexlify(self.s).decode()
 
-
-
+    def __repr__(self):
+        return str(self)
