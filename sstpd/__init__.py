@@ -5,5 +5,5 @@ __version__ = '0.4.2'
 
 
 def run():
-    from __main__ import main
+    from .__main__ import main
     main()

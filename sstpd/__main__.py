@@ -144,7 +144,6 @@ def main():
                                   args.listen_port,
                                   ssl=ssl_ctx)
     server = loop.run_until_complete(coro)
-    factory()  # test
 
     if args.proxy_protocol:
         logging.info('PROXY PROTOCOL is activated.')
@@ -154,6 +153,8 @@ def main():
         logging.info('Listening on %s:%s...', args.listen, args.listen_port)
     try:
         loop.run_forever()
+    except KeyboardInterrupt:
+        logging.info('Exit by interrupt')
     finally:
         loop.close()
 

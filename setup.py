@@ -1,8 +1,19 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python3
+from __future__ import print_function
+import sys
 from setuptools import setup, Extension
 
 from sstpd import __version__ as version
 
+
+if sys.version_info < (3, 4, 4):
+    if sys.version_info < (3, ):
+        print("""\nsstp-server v0.5+ does not support Python 2,
+If you want use it with Python 2, please upgrade your pip to 9.0.1+ then retry,
+or install sstp-server v4.x manually.""", file=sys.stderr)
+    else:
+        print("\nsstp-server requires Python 3.4.4 or above.", file=sys.stderr)
+    sys.exit(1)
 
 with open('README.rst') as readme:
     long_description = readme.read()
@@ -22,18 +33,15 @@ setup(
     [console_scripts]
     sstpd = sstpd:run
     """,
-    install_requires=[
-        'twisted', 'service_identity', 'argparse', 'ipaddress'
-    ],
     classifiers=[
         'Development Status :: 3 - Alpha',
         'Environment :: Console',
-        'Programming Language :: Python :: 2.7',
-        'Programming Language :: Python :: 2 :: Only',
+        'Programming Language :: Python :: 3 :: Only',
         'Topic :: Internet',
         'Topic :: Internet :: Proxy Servers',
         'License :: OSI Approved :: MIT License'
     ],
-    long_description=long_description
+    long_description=long_description,
+    python_requires='>=3.4.4',
 )
 
