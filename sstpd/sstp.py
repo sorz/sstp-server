@@ -4,6 +4,7 @@ import logging
 import asyncio
 from asyncio import Protocol
 from functools import partial
+from binascii import hexlify
 
 from . import __version__
 from .constants import *
@@ -90,10 +91,10 @@ class SSTPProtocol(Protocol):
             if len(self.receive_buf) > HTTP_REQUEST_BUFFER_SIZE:
                 close('Request too large, may not a valid HTTP request.')
             return
-        requestLine = self.receive_buf.split(b'\r\n')[0]
+        request_line = self.receive_buf.split(b'\r\n')[0]
         self.receive_buf = b''
         try:
-            method, uri, version = requestLine.split()
+            method, uri, version = request_line.split()
         except ValueError:
             return close('Not a valid HTTP request.')
         if method != b"SSTP_DUPLEX_POST" or version != b"HTTP/1.1":
@@ -130,17 +131,17 @@ class SSTPProtocol(Protocol):
         if c == 0:  # Data packet
             self.sstp_data_packet_received(packet[4:])
         else:  # Control packet
-            messageType = packet[4:6]
-            numAttributes = struct.unpack('!H', packet[6:8])[0]
+            msg_type = packet[4:6]
+            num_attrs = struct.unpack('!H', packet[6:8])[0]
             attributes = []
             attrs = packet[8:]
-            while len(attributes) < numAttributes:
+            while len(attributes) < num_attrs:
                 id = attrs[1]
                 length = parse_length(attrs[2:4])
                 value = attrs[4:length]
                 attrs = attrs[length:]
                 attributes.append((id, value))
-            self.sstp_control_packet_received(messageType, attributes)
+            self.sstp_control_packet_received(msg_type, attributes)
 
 
     def sstp_data_packet_received(self, data):
@@ -153,34 +154,35 @@ class SSTPProtocol(Protocol):
         self.pppd.write_frame(data)
 
 
-    def sstp_control_packet_received(self, messageType, attributes):
+    def sstp_control_packet_received(self, msg_type, attributes):
         logging.info('SSTP control packet (%s) received.',
-                     MsgType.str.get(messageType, messageType))
-        if messageType == MsgType.CALL_CONNECT_REQUEST:
+                     MsgType.str.get(msg_type, msg_type))
+        if msg_type == MsgType.CALL_CONNECT_REQUEST:
             protocolId = attributes[0][1]
             self.sstp_call_connect_request_received(protocolId)
-        elif messageType == MsgType.CALL_CONNECTED:
+        elif msg_type == MsgType.CALL_CONNECTED:
             attr = attributes[0][1]
-            hashType = attr[3:4]
+            hash_type = attr[3:4]
             nonce = attr[4:36]
             cert_hash = attr[36:68]
-            macHash = attr[68:72]
-            self.sstp_call_connected_received(hashType, nonce, cert_hash, macHash)
-        elif messageType == MsgType.CALL_ABORT:
+            mac_hash = attr[68:72]
+            self.sstp_call_connected_received(hash_type, nonce,
+                                              cert_hash, mac_hash)
+        elif msg_type == MsgType.CALL_ABORT:
             if attributes:
                 self.sstp_msg_call_abort(attributes[0][1])
             else:
                 self.sstp_msg_call_abort()
-        elif messageType == MsgType.CALL_DISCONNECT:
+        elif msg_type == MsgType.CALL_DISCONNECT:
             if attributes:
                 self.sstp_msg_call_disconnect(attributes[0][1])
             else:
                 self.sstp_msg_call_disconnect()
-        elif messageType == MsgType.CALL_DISCONNECT_ACK:
+        elif msg_type == MsgType.CALL_DISCONNECT_ACK:
             self.sstp_msg_call_disconnect_ack()
-        elif messageType == MsgType.ECHO_REQUEST:
+        elif msg_type == MsgType.ECHO_REQUEST:
             self.sstp_msg_echo_request()
-        elif messageType == MsgType.ECHO_RESPONSE:
+        elif msg_type == MsgType.ECHO_RESPONSE:
             self.sstp_msg_echo_response()
         else:
             logging.warn('Unknown type of SSTP control packet.')
@@ -207,7 +209,7 @@ class SSTPProtocol(Protocol):
         # 3 bytes reserved + 1 byte hash bitmap (SHA-1 only) + nonce.
         ack.attributes = [(SSTP_ATTRIB_CRYPTO_BINDING_REQ,
                 b'\x00\x00\x00' + b'\x03' + self.nonce)]
-        ack.writeTo(self.transport.write)
+        ack.write_to(self.transport.write)
 
         remote = ''
         if self.factory.remote_pool:
@@ -239,16 +241,16 @@ class SSTPProtocol(Protocol):
         self.pppd = protocol
         self.pppd.resume_producing()
 
-    def sstp_call_connected_received(self, hashType, nonce, cert_hash, macHash):
+    def sstp_call_connected_received(self, hash_type, nonce, cert_hash, mac_hash):
         if self.state in (CALL_ABORT_TIMEOUT_PENDING, CALL_ABORT_PENDING,
                 CALL_DISCONNECT_ACK_PENDING, CALL_DISCONNECT_TIMEOUT_PENDING):
             return
         if self.state != SERVER_CALL_CONNECTED_PENDING:
             self.abort(ATTRIB_STATUS_UNACCEPTED_FRAME_RECEIVED)
-        # TODO: check cert_hash and macHash
-        logging.debug("Received cert hash: %s", cert_hash.encode('hex'))
-        logging.debug("Received MAC hash: %s", macHash.encode('hex'))
-        logging.debug("Hash type: %s", hex(ord(hashType)))
+        # TODO: check cert_hash and mac_hash
+        logging.debug("Received cert hash: %s", hexlify(cert_hash).decode())
+        logging.debug("Received MAC hash: %s", hexlify(mac_hash).decode())
+        logging.debug("Hash type: %s", hash_type)
 
         if nonce != self.nonce:
             logging.warn('Received wrong nonce.')
@@ -277,7 +279,7 @@ class SSTPProtocol(Protocol):
             return
         self.state = CALL_ABORT_IN_PROGRESS_2
         msg = SSTPControlPacket(MsgType.CALL_ABORT)
-        msg.writeTo(self.transport.write)
+        msg.write_to(self.transport.write)
         self.state = CALL_ABORT_PENDING
         self.loop.call_later(1, self.transport.close)
 
@@ -289,7 +291,7 @@ class SSTPProtocol(Protocol):
         logging.info('Received call disconnect request.')
         self.state = CALL_DISCONNECT_IN_PROGRESS_2
         ack = SSTPControlPacket(MsgType.CALL_DISCONNECT_ACK)
-        ack.writeTo(self.transport.write)
+        ack.write_to(self.transport.write)
         self.state = CALL_DISCONNECT_TIMEOUT_PENDING
         self.loop.call_later(1, self.transport.close)
 
@@ -306,7 +308,7 @@ class SSTPProtocol(Protocol):
     def sstp_msg_echo_request(self):
         if self.state == SERVER_CALL_CONNECTED:
             response = SSTPControlPacket(MsgType.ECHO_RESPONSE)
-            response.writeTo(self.transport.write)
+            response.write_to(self.transport.write)
         elif self.state in (CALL_ABORT_TIMEOUT_PENDING, CALL_ABORT_PENDING,
                 CALL_DISCONNECT_ACK_PENDING, CALL_DISCONNECT_TIMEOUT_PENDING):
             return
@@ -332,7 +334,7 @@ class SSTPProtocol(Protocol):
         else:
             logging.info('Send echo request.')
             echo = SSTPControlPacket(MsgType.ECHO_REQUEST)
-            echo.writeTo(self.transport.write)
+            echo.write_to(self.transport.write)
             self.reset_hello_timer(True)
 
     def reset_hello_timer(self, close=False):
@@ -356,7 +358,7 @@ class SSTPProtocol(Protocol):
         msg = SSTPControlPacket(MsgType.CALL_ABORT)
         if status is not None:
             msg.attributes = [(SSTP_ATTRIB_STATUS_INFO, status)]
-        msg.writeTo(self.transport.write)
+        msg.write_to(self.transport.write)
         self.state = CALL_ABORT_PENDING
         self.loop.call_later(3, self.transport.close)
 
@@ -367,7 +369,7 @@ class SSTPProtocol(Protocol):
         if self.state == SERVER_CALL_CONNECTED_PENDING or \
                 self.state == SERVER_CALL_CONNECTED:
             packet = SSTPDataPacket(frame)
-            packet.writeTo(self.transport.write)
+            packet.write_to(self.transport.write)
 
 
     def write_ppp_data_frame(self, frame):
@@ -376,7 +378,7 @@ class SSTPProtocol(Protocol):
             logging.log(VERBOSE, hexdump(frame))
         if self.state == SERVER_CALL_CONNECTED:
             packet = SSTPDataPacket(frame)
-            packet.writeTo(self.transport.write)
+            packet.write_to(self.transport.write)
 
 
     def ppp_stopped(self):
@@ -388,7 +390,7 @@ class SSTPProtocol(Protocol):
         self.state = CALL_DISCONNECT_IN_PROGRESS_1
         msg = SSTPControlPacket(MsgType.CALL_DISCONNECT)
         msg.attributes = [(SSTP_ATTRIB_NO_ERROR, ATTRIB_STATUS_NO_ERROR)]
-        msg.writeTo(self.transport.write)
+        msg.write_to(self.transport.write)
         self.state = CALL_DISCONNECT_ACK_PENDING
         self.loop.call_later(3, self.transport.close)
 
