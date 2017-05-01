@@ -106,70 +106,137 @@ codec_escape(PyObject *self, PyObject *args)
 }
 
 
-static PyObject *
-codec_unescape(PyObject *self, PyObject *args)
-{
-    const char* data; /* escaped data */
-    const char* ldata; /* last unused unescaped data */
-    int data_len;
-    int ldata_len;
-    PyObject* py_escaped;
-    char* buffer; /* frame buffer */
-    int pos; /* length of frame */
-    PyObject* frames;
+typedef struct {
+    PyObject_HEAD
+    char* frame_buf;
+    int frame_buf_pos;
     bool escaped;
+} PppDecoder;
+
+
+static PyObject *
+PppDecoder_unescape(PppDecoder *self, PyObject *args)
+{
+    Py_buffer buf_in;
+    const char* data; /* escaped data */
+    PyObject* frames;
     int i;
 
-    if (!PyArg_ParseTuple(args, "y#y#O", &data, &data_len, &ldata, &ldata_len, &py_escaped))
+    if (!PyArg_ParseTuple(args, "y*", &buf_in))
         return NULL;
-    escaped = PyObject_IsTrue(py_escaped);
-
-    buffer = malloc(sizeof(char[data_len + ldata_len]));
-    if (!buffer)
-        return PyErr_NoMemory();
-    memcpy(buffer, ldata, ldata_len);
-    pos = ldata_len;
 
     frames = PyList_New(0);
     if (!frames)
         return NULL;
 
-    for (i=0; i<data_len; ++i) {
-        if (escaped) {
-            escaped = false;
-            buffer[pos++] = data[i] ^ 0x20;
+    data = (char*) buf_in.buf;
+    for (i=0; i<buf_in.len; ++i) {
+        if (self->escaped) {
+            self->escaped = false;
+            self->frame_buf[self->frame_buf_pos++] = data[i] ^ 0x20;
         }
         else if (data[i] == CONTROL_ESCAPE) {
-            escaped = true;
+            self->escaped = true;
         }
         else if (data[i] == FLAG_SEQUENCE) {
-            if (pos > 4) {
+            if (self->frame_buf_pos > 4) {
                 /* Ignore 2-bytes FCS field */
-                PyObject* frame = Py_BuildValue("y#", buffer, pos - 2);
+                PyObject* frame = Py_BuildValue("y#",
+                        self->frame_buf, self->frame_buf_pos - 2);
                 if (PyList_Append(frames, frame) == -1) {
                     Py_DECREF(frame);
-                    free(buffer);
+                    self->frame_buf_pos = 0;
+                    PyBuffer_Release(&buf_in);
                     return NULL;
                 }
                 Py_DECREF(frame);
             }
-            pos = 0;
+            self->frame_buf_pos = 0;
         }
         else {
-            buffer[pos++] = data[i];
+            self->frame_buf[self->frame_buf_pos++] = data[i];
         }
     }
+    PyBuffer_Release(&buf_in);
 
-    PyObject* result = Py_BuildValue("Ny#O", frames, buffer, pos, escaped ? Py_True : Py_False);
-    free(buffer);
+    PyObject* result = Py_BuildValue("N", frames);
     return result;
 }
 
+static void
+PppDecoder_dealloc(PppDecoder* self) {
+    free(self->frame_buf);
+    Py_TYPE(self)->tp_free((PyObject*)self);
+}
+
+static PyObject *
+PppDecoder_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
+{
+    PppDecoder *self;
+    self = (PppDecoder *)type->tp_alloc(type, 0);
+    if (self != NULL) {
+        self->frame_buf = malloc(sizeof(char[1502]));
+        if (!self->frame_buf) {
+            Py_DECREF(self);
+            return PyErr_NoMemory();
+        }
+        self->frame_buf_pos = 0;
+        self->escaped = false;
+    }
+    return (PyObject *)self;
+}
+
+static PyMethodDef PppDecoder_methods[] = {
+    {"unescape", (PyCFunction) PppDecoder_unescape, METH_VARARGS,
+     "Unescape PPP frame stream, return a list of unescaped frame."
+    },
+    {NULL}  /* Sentinel */
+};
+
+
+static PyTypeObject codec_PppDecoderType = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    "codec.PppDecoder",               /* tp_name */
+    sizeof(PppDecoder),               /* tp_basicsize */
+    0,                                /* tp_itemsize */
+    (destructor)PppDecoder_dealloc,   /* tp_dealloc */
+    0,                                /* tp_print */
+    0,                                /* tp_getattr */
+    0,                                /* tp_setattr */
+    0,                                /* tp_reserved */
+    0,                                /* tp_repr */
+    0,                                /* tp_as_number */
+    0,                                /* tp_as_sequence */
+    0,                                /* tp_as_mapping */
+    0,                                /* tp_hash  */
+    0,                                /* tp_call */
+    0,                                /* tp_str */
+    0,                                /* tp_getattro */
+    0,                                /* tp_setattro */
+    0,                                /* tp_as_buffer */
+    Py_TPFLAGS_DEFAULT,               /* tp_flags */
+    "PPP Decoder",                    /* tp_doc */
+    0,                                /* tp_traverse */
+    0,                                /* tp_clear */
+    0,                                /* tp_richcompare */
+    0,                                /* tp_weaklistoffset */
+    0,                                /* tp_iter */
+    0,                                /* tp_iternext */
+    PppDecoder_methods,               /* tp_methods */
+    0,                                /* tp_members */
+    0,                                /* tp_getset */
+    0,                                /* tp_base */
+    0,                                /* tp_dict */
+    0,                                /* tp_descr_get */
+    0,                                /* tp_descr_set */
+    0,                                /* tp_dictoffset */
+    0,                                /* tp_init */
+    0,                                /* tp_alloc */
+    PppDecoder_new,                   /* tp_new */
+};
+
 
 static PyMethodDef CodecMethods[] = {
-    {"unescape", codec_unescape, METH_VARARGS,
-     "Unescape PPP frame stream, return a list of unescaped frame and an "
-     "incomplete frame (if any)."},
     {"escape", codec_escape, METH_VARARGS,
      "Escape a PPP frame ending with correct FCS code."},
     {NULL, NULL, 0, NULL}
@@ -187,6 +254,16 @@ static struct PyModuleDef codecmodule = {
 PyMODINIT_FUNC
 PyInit_codec(void)
 {
-    (void) PyModule_Create(&codecmodule);
+    PyObject* m;
+
+    if (PyType_Ready(&codec_PppDecoderType) < 0)
+        return NULL;
+
+    m = PyModule_Create(&codecmodule);
+    if (m == NULL)
+        return NULL;
+     Py_INCREF(&codec_PppDecoderType);
+     PyModule_AddObject(m, "PppEncoder", (PyObject *) &codec_PppDecoderType);
+     return m;
 }
 

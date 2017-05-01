@@ -3,7 +3,7 @@ from struct import pack
 import asyncio
 
 from .constants import VERBOSE
-from .codec import unescape, escape
+from .codec import escape, PppEncoder
 from .utils import hexdump
 
 
@@ -14,8 +14,7 @@ STDERR = 2
 class PPPDProtocol(asyncio.SubprocessProtocol):
 
     def __init__(self):
-        self.frame_buf = b''
-        self.frame_escaped = False
+        self.encoder = PppEncoder()
 
     def write_frame(self, frame):
         self.write_transport.write(escape(frame))
@@ -34,9 +33,7 @@ class PPPDProtocol(asyncio.SubprocessProtocol):
     def out_received(self, data):
         if __debug__:
             logging.log(VERBOSE, "Raw data: %s", hexdump(data))
-        frames, self.frame_buf, self.frame_escaped = \
-                unescape(data, self.frame_buf, self.frame_escaped)
-        for frame in frames:
+        for frame in self.encoder.unescape(data):
             self.ppp_frame_received(frame)
 
     def ppp_frame_received(self, frame):
