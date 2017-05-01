@@ -27,7 +27,7 @@ class SSTPProtocol(Protocol):
         self.loop = asyncio.get_event_loop()
         self.state = SERVER_CALL_DISCONNECTED
         self.sstp_packet_len = 0
-        self.receive_buf = b''
+        self.receive_buf = bytearray()
         self.nonce = None
         self.pppd = None
         self.retry_counter = 0
@@ -65,7 +65,7 @@ class SSTPProtocol(Protocol):
 
 
     def proxy_protocol_data_received(self, data):
-        self.receive_buf += data
+        self.receive_buf.extend(data)
         try:
             src, dest, self.receive_buf = parse_pp_header(self.receive_buf)
         except PPNoEnoughData:
@@ -78,7 +78,7 @@ class SSTPProtocol(Protocol):
             self.remote_host = src[0]
             self.proxy_protocol_passed = True
             if self.receive_buf:
-                self.dataReceived(b'')
+                self.data_received(b'')
 
 
     def http_data_received(self, data):
@@ -86,13 +86,13 @@ class SSTPProtocol(Protocol):
             logging.warning(*args)
             self.transport.close()
 
-        self.receive_buf += data
+        self.receive_buf.extend(data)
         if b"\r\n\r\n" not in self.receive_buf:
             if len(self.receive_buf) > HTTP_REQUEST_BUFFER_SIZE:
                 close('Request too large, may not a valid HTTP request.')
             return
         request_line = self.receive_buf.split(b'\r\n')[0]
-        self.receive_buf = b''
+        self.receive_buf.clear()
         try:
             method, uri, version = request_line.split()
         except ValueError:
@@ -107,7 +107,7 @@ class SSTPProtocol(Protocol):
 
 
     def sstp_data_received(self, data):
-        self.receive_buf += data
+        self.receive_buf.extend(data)
         while len(self.receive_buf) >= 4:
             # Check version.
             if self.receive_buf[0] != 0x10:
@@ -119,7 +119,7 @@ class SSTPProtocol(Protocol):
                 self.sstp_packet_len = parse_length(self.receive_buf[2:4])
             if len(self.receive_buf) < self.sstp_packet_len:
                 return
-            packet = self.receive_buf[:self.sstp_packet_len]
+            packet = memoryview(self.receive_buf)[:self.sstp_packet_len]
             self.receive_buf = self.receive_buf[self.sstp_packet_len:]
             self.sstp_packet_len = 0
             self.sstp_packet_received(packet)
@@ -131,7 +131,7 @@ class SSTPProtocol(Protocol):
         if c == 0:  # Data packet
             self.sstp_data_packet_received(packet[4:])
         else:  # Control packet
-            msg_type = packet[4:6]
+            msg_type = packet[4:6].tobytes()
             num_attrs = struct.unpack('!H', packet[6:8])[0]
             attributes = []
             attrs = packet[8:]

@@ -73,24 +73,27 @@ static PyObject *
 codec_escape(PyObject *self, PyObject *args)
 {
     const unsigned char* data;
-    int data_len;
+    Py_buffer buf_in;
     unsigned char* buffer;
     int pos = 0;
     u16 fcs = PPPINITFCS16;
     int i;
 
-    if (!PyArg_ParseTuple(args, "y#", &data, &data_len))
+    if (!PyArg_ParseTuple(args, "y*", &buf_in))
         return NULL;
-    buffer = malloc(sizeof(char[(data_len + 2) * 2 + 2]));
+    buffer = malloc(sizeof(char[(buf_in.len + 2) * 2 + 2]));
     if (!buffer)
         return PyErr_NoMemory();
 
     buffer[pos++] = FLAG_SEQUENCE;
 
-    for (i=0; i<data_len; ++i) {
+    data = (unsigned char*) buf_in.buf;
+    for (i=0; i<buf_in.len; ++i) {
         fcs = (fcs >> 8) ^ fcstab[(fcs ^ data[i]) & 0xff];
         escape_to(data[i], buffer, &pos);
     }
+    PyBuffer_Release(&buf_in);
+
     fcs ^= 0xffff;
     escape_to(fcs & 0x00ff, buffer, &pos);
     escape_to(fcs >> 8, buffer, &pos);
