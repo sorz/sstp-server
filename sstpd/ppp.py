@@ -15,6 +15,7 @@ class PPPDProtocol(asyncio.SubprocessProtocol):
 
     def __init__(self):
         self.encoder = PppEncoder()
+        # uvloop not allow pause a paused transport
         self.paused = False
 
     def write_frame(self, frame):
@@ -54,7 +55,13 @@ class PPPDProtocol(asyncio.SubprocessProtocol):
 
     def pipe_connection_lost(self, fd, err):
         logging.debug('pppd stdin/out lost: %s', err)
-        self.transport.close()
+        # is_closing() require Python 3.5.1+
+        if hasattr(self.transport, 'is_closing'):
+            # uvloop not allow close a closed transport
+            if not self.transport.is_closing():
+                self.transport.close()
+        else:
+            self.transport.close()
 
     def process_exited(self):
         logging.info('pppd exited with code %s.',
