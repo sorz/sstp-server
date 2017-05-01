@@ -5,6 +5,10 @@ import argparse
 from configparser import SafeConfigParser, NoSectionError
 import ssl
 import asyncio
+try:
+    import uvloop
+except ImportError:
+    uvloop = None
 
 from . import __doc__
 from .sstp import SSTPProtocolFactory
@@ -130,6 +134,11 @@ def main():
         cert_hash = None
     on_unix_socket = args.listen.startswith('/')
 
+    if uvloop is None:
+        logging.info('Running without uvloop')
+    else:
+        asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
+        logging.info('Using uvloop')
     loop = asyncio.get_event_loop()
     factory = SSTPProtocolFactory(args,
                                   remote_pool=ippool,

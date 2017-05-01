@@ -1,7 +1,7 @@
 import struct
 
 
-class SSTPPacket(object):
+class SSTPPacket:
     _version = 0x10
 
     def __init__(self, c, data=b''):

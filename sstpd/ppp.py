@@ -15,6 +15,7 @@ class PPPDProtocol(asyncio.SubprocessProtocol):
 
     def __init__(self):
         self.encoder = PppEncoder()
+        self.paused = False
 
     def write_frame(self, frame):
         self.write_transport.write(escape(frame))
@@ -61,12 +62,16 @@ class PPPDProtocol(asyncio.SubprocessProtocol):
         self.sstp.ppp_stopped()
 
     def pause_producing(self):
-        logging.debug('Pause producting')
-        self.read_transport.pause_reading()
+        if not self.paused:
+            self.paused = True
+            logging.debug('Pause producting')
+            self.read_transport.pause_reading()
 
     def resume_producing(self):
-        logging.debug('Resume producing')
-        self.read_transport.resume_reading()
+        if self.paused:
+            self.paused = False
+            logging.debug('Resume producing')
+            self.read_transport.resume_reading()
 
 
 class PPPDProtocolFactory:

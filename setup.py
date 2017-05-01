@@ -43,5 +43,8 @@ setup(
     ],
     long_description=long_description,
     python_requires='>=3.4.4',
+    extras_require={
+        'uvloop': ['uvloop>=v0.8.0']
+    },
 )
 

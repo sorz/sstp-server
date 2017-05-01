@@ -146,7 +146,7 @@ class SSTPProtocol(Protocol):
 
     def sstp_data_packet_received(self, data):
         if __debug__:
-            logging.debug('Forwarding SSTP data to pppd (%s bytes).' % len(data))
+            logging.debug('Forwarding SSTP data to pppd (%s bytes).', len(data))
             logging.log(VERBOSE, hexdump(data))
         if self.pppd is None:
             print('pppd is None.')
@@ -353,7 +353,7 @@ class SSTPProtocol(Protocol):
         if status is None:
             logging.warn('Abort.')
         else:
-            logging.warn('Abort (%s).' % ord(status[-1]))
+            logging.warn('Abort (%s).', status)
         self.state = CALL_DISCONNECT_IN_PROGRESS_1
         msg = SSTPControlPacket(MsgType.CALL_ABORT)
         if status is not None:
@@ -364,7 +364,7 @@ class SSTPProtocol(Protocol):
 
 
     def write_ppp_control_frame(self, frame):
-        logging.debug('PPP control frame received (%s bytes).' % len(frame))
+        logging.debug('PPP control frame received (%s bytes).', len(frame))
         logging.log(VERBOSE, hexdump(frame))
         if self.state == SERVER_CALL_CONNECTED_PENDING or \
                 self.state == SERVER_CALL_CONNECTED:
@@ -374,7 +374,7 @@ class SSTPProtocol(Protocol):
 
     def write_ppp_data_frame(self, frame):
         if __debug__:
-            logging.debug('PPP data frame received (%s bytes).' % len(frame))
+            logging.debug('PPP data frame received (%s bytes).', len(frame))
             logging.log(VERBOSE, hexdump(frame))
         if self.state == SERVER_CALL_CONNECTED:
             packet = SSTPDataPacket(frame)
