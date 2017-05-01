@@ -1,5 +1,5 @@
-#!/usr/bin/env python2
-from sys import stdin, stdout
+#!/usr/bin/env python3
+import sys
 from tty import setcbreak, TCSANOW
 import time
 
@@ -10,7 +10,9 @@ IP1_EN = (b'\x7e\x80\x21\x7d\x22\x7d\x22\x7d\x20\x7d\x2a\x7d\x23\x7d\x26\x7d'
           b'\x2a\x7d\x2a\x20\x7d\x21\x6d\xf9\x7e')
 
 def main():
-    setcbreak(stdin, TCSANOW)
+    #setcbreak(stdin, TCSANOW)
+    stdin = sys.stdin.buffer
+    stdout = sys.stdout.buffer
 
     stdout.write(LCP1_EN + LCP1_EN[1:])
     stdout.flush()

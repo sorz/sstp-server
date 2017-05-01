@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python3
 from subprocess import Popen
 import socket
 import time
@@ -22,12 +22,12 @@ def _ssl_connect():
 
 
 def _http_handshake(conn):
-    conn.write("SSTP_DUPLEX_POST "
-               "/sra_{BA195980-CD49-458b-9E23-C84EE0ADCD75}/ HTTP/1.1\r\n"
-               "Content-Length: 18446744073709551615\r\n"
-               "Host: 127.0.0.1\r\n"
-               "SSTPCORRELATIONID: {3F2504E0-4F89-11D3-9A0C-0305E82C3301}\r\n"
-               "\r\n")
+    conn.write(b"SSTP_DUPLEX_POST "
+               b"/sra_{BA195980-CD49-458b-9E23-C84EE0ADCD75}/ HTTP/1.1\r\n"
+               b"Content-Length: 18446744073709551615\r\n"
+               b"Host: 127.0.0.1\r\n"
+               b"SSTPCORRELATIONID: {3F2504E0-4F89-11D3-9A0C-0305E82C3301}\r\n"
+               b"\r\n")
     resp = conn.recv(4096)
     assert resp.startswith(b'HTTP/1.1 200 OK')
 
