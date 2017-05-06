@@ -12,20 +12,6 @@ VERBOSE = 5
 
 ## Protocol related constants
 
-# State
-SERVER_CALL_DISCONNECTED = 'Server_Call_Disconnected'
-SERVER_CONNECT_REQUEST_PENDING = 'Server_Connect_Request_Pending'
-SERVER_CALL_CONNECTED_PENDING = 'Server_Call_Connected_Pending'
-SERVER_CALL_CONNECTED = 'Server_Call_Connected'
-CALL_DISCONNECT_IN_PROGRESS_1 = 'Call_Disconnect_In_Progress_1'
-CALL_DISCONNECT_IN_PROGRESS_2 = 'Call_Disconnect_In_Progress_2'
-CALL_DISCONNECT_TIMEOUT_PENDING = 'Call_Disconnect_Timeout_Pending'
-CALL_DISCONNECT_ACK_PENDING = 'Call_Disconnect_Timeout_Pending'
-CALL_ABORT_IN_PROGRESS_1 = 'Call_Abort_In_Progress_1'
-CALL_ABORT_IN_PROGRESS_2 = 'Call_Abort_In_Progress_2'
-CALL_ABORT_TIMEOUT_PENDING = 'Call_Abort_Timeout_Pending'
-CALL_ABORT_PENDING = 'Call_Abort_Timeout_Pending'
-
 # Message Type
 class MsgType(metaclass=SimpleEnumMeta):
     CALL_CONNECT_REQUEST = b'\x00\x01'
