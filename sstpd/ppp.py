@@ -1,3 +1,4 @@
+import os
 import logging
 from struct import pack
 import asyncio
@@ -17,6 +18,8 @@ class PPPDProtocol(asyncio.SubprocessProtocol):
         self.encoder = PppEncoder()
         # uvloop not allow pause a paused transport
         self.paused = False
+        # for fixing uvloop bug
+        self.exited = False
 
     def write_frame(self, frame):
         self.write_transport.write(escape(frame))
@@ -53,20 +56,38 @@ class PPPDProtocol(asyncio.SubprocessProtocol):
         logging.warn('Received errors from pppd.')
         logging.warn(data)
 
-    def pipe_connection_lost(self, fd, err):
-        logging.debug('pppd stdin/out lost: %s', err)
-        # is_closing() require Python 3.5.1+
-        if hasattr(self.transport, 'is_closing'):
-            # uvloop not allow close a closed transport
-            if not self.transport.is_closing():
-                self.transport.close()
+    def connection_lost(self, err):
+        if err is None:
+            logging.debug('pppd closed with EoF')
         else:
-            self.transport.close()
+            logging.info('pppd closed with error: %s', err)
 
     def process_exited(self):
-        logging.info('pppd exited with code %s.',
-                     self.transport.get_returncode())
+        # uvloop 0.8.0 dosen't call this callback
+        self._process_exited(self.transport.get_returncode())
+
+    def _process_exited(self, returncode):
+        if self.exited:
+            return
+        self.exited = True
+        logging.info('pppd exited with code %s.', returncode)
         self.sstp.ppp_stopped()
+
+    def pipe_connection_lost(self, fd, exc):
+        if fd != STDOUT:
+            return
+        # uvloop 0.8.0 dosen't wait for exited pppd process,
+        # so we try to wait here
+        pid = self.transport.get_pid()
+        def wait_pppd():
+            if self.exited:
+                return  # not bug, not need to fix
+            try:
+                pid, returncode = os.waitpid(-1, os.WNOHANG)
+                self._process_exited(-returncode)
+            except OSError as e:
+                logging.warning("fail to wait for pppd", e)
+        asyncio.get_event_loop().call_later(1, wait_pppd)
 
     def pause_producing(self):
         if not self.paused:
