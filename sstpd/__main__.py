@@ -66,7 +66,7 @@ def _get_args():
                  'Useful when running behind a reverse proxy.')
     parser.add_argument('--proxy-protocol',
             action='store_true',
-            help='Enable PROXY PROTOCOL, must use together with --no-ssl')
+            help='Enable PROXY PROTOCOL, imply --no-ssl')
     parser.add_argument('--pppd',
             metavar='PPPD-FILE')
     parser.add_argument('--pppd-config',
@@ -89,7 +89,7 @@ def _get_args():
     args = parser.parse_args()
     args.log_level = int(args.log_level)
     args.listen_port = int(args.listen_port)
-    args.proxy_protocol = args.proxy_protocol and args.no_ssl
+    args.no_ssl = args.proxy_protocol or args.no_ssl
     return args
 
 

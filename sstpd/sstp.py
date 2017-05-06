@@ -11,7 +11,7 @@ from .constants import *
 from .packets import SSTPDataPacket, SSTPControlPacket
 from .utils import hexdump
 from .ppp import PPPDProtocol, PPPDProtocolFactory
-#from .proxy_protocol import parse_pp_header, PPException, PPNoEnoughData
+from .proxy_protocol import parse_pp_header, PPException, PPNoEnoughData
 
 
 HTTP_REQUEST_BUFFER_SIZE = 10 * 1024
@@ -99,7 +99,8 @@ class SSTPProtocol(Protocol):
             return close('Not a valid HTTP request.')
         if method != b"SSTP_DUPLEX_POST" or version != b"HTTP/1.1":
             return close('Unexpected HTTP method (%s) and/or version (%s).',
-                         method, version)
+                         method.decode(errors='replace'),
+                         version.decode(errors='replace'))
         self.transport.write(b'HTTP/1.1 200 OK\r\n'
                 b'Content-Length: 18446744073709551615\r\n'
                 b'Server: SSTP-Server/%s\r\n\r\n' % str(__version__).encode())
