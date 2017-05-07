@@ -4,7 +4,7 @@ from struct import pack
 import asyncio
 
 from .constants import VERBOSE
-from .codec import escape, PppEncoder
+from .codec import escape, PppDecoder
 from .utils import hexdump
 
 
@@ -22,7 +22,7 @@ def is_ppp_control_frame(frame):
 class PPPDProtocol(asyncio.SubprocessProtocol):
 
     def __init__(self):
-        self.encoder = PppEncoder()
+        self.decoder = PppDecoder()
         # uvloop not allow pause a paused transport
         self.paused = False
         # for fixing uvloop bug
@@ -45,7 +45,7 @@ class PPPDProtocol(asyncio.SubprocessProtocol):
     def out_received(self, data):
         if __debug__:
             logging.log(VERBOSE, "Raw data: %s", hexdump(data))
-        frames = self.encoder.unescape(data)
+        frames = self.decoder.unescape(data)
         self.sstp.write_ppp_frames(frames)
 
     def err_received(self, data):

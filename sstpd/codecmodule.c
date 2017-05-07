@@ -263,7 +263,7 @@ PyInit_codec(void)
     if (m == NULL)
         return NULL;
      Py_INCREF(&codec_PppDecoderType);
-     PyModule_AddObject(m, "PppEncoder", (PyObject *) &codec_PppDecoderType);
+     PyModule_AddObject(m, "PppDecoder", (PyObject *) &codec_PppDecoderType);
      return m;
 }
 
