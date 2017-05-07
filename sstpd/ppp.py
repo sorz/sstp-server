@@ -12,6 +12,13 @@ STDIN = 0
 STDOUT = 1
 STDERR = 2
 
+def is_ppp_control_frame(frame):
+    if frame.startswith(b'\xff\x03'):
+        protocol = frame[2:4]
+    else:
+        protocol = frame[:2]
+    return protocol[0] in (0x80, 0x82, 0xc0, 0xc2, 0xc4)
+
 class PPPDProtocol(asyncio.SubprocessProtocol):
 
     def __init__(self):
@@ -38,19 +45,8 @@ class PPPDProtocol(asyncio.SubprocessProtocol):
     def out_received(self, data):
         if __debug__:
             logging.log(VERBOSE, "Raw data: %s", hexdump(data))
-        for frame in self.encoder.unescape(data):
-            self.ppp_frame_received(frame)
-
-    def ppp_frame_received(self, frame):
-        if frame.startswith(b'\xff\x03'):
-            protocol = frame[2:4]
-        else:
-            protocol = frame[:2]
-
-        if protocol[0] in (0x80, 0x82, 0xc0, 0xc2, 0xc4):
-            self.sstp.write_ppp_control_frame(frame)
-        else:
-            self.sstp.write_ppp_data_frame(frame)
+        frames = self.encoder.unescape(data)
+        self.sstp.write_ppp_frames(frames)
 
     def err_received(self, data):
         logging.warn('Received errors from pppd.')

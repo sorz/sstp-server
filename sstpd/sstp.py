@@ -11,7 +11,7 @@ from . import __version__
 from .constants import *
 from .packets import SSTPDataPacket, SSTPControlPacket
 from .utils import hexdump
-from .ppp import PPPDProtocol, PPPDProtocolFactory
+from .ppp import PPPDProtocol, PPPDProtocolFactory, is_ppp_control_frame
 from .proxy_protocol import parse_pp_header, PPException, PPNoEnoughData
 
 
@@ -124,6 +124,7 @@ class SSTPProtocol(Protocol):
 
 
     def sstp_data_received(self, data):
+        self.reset_hello_timer()
         self.receive_buf.extend(data)
         while len(self.receive_buf) >= 4:
             # Check version.
@@ -143,9 +144,8 @@ class SSTPProtocol(Protocol):
 
 
     def sstp_packet_received(self, packet):
-        self.reset_hello_timer()
         c = packet[1] & 0x01
-        if c == 0:  # Data packet
+        if c is 0:  # Data packet
             self.sstp_data_packet_received(packet[4:])
         else:  # Control packet
             msg_type = packet[4:6].tobytes()
@@ -389,24 +389,16 @@ class SSTPProtocol(Protocol):
         self.state = State.CALL_ABORT_PENDING
         self.loop.call_later(3, self.transport.close)
 
-
-    def write_ppp_control_frame(self, frame):
-        logging.debug('pppd => sstp [control frame] (%s bytes).', len(frame))
-        logging.log(VERBOSE, hexdump(frame))
-        if self.state is State.SERVER_CALL_CONNECTED_PENDING or \
-                self.state is State.SERVER_CALL_CONNECTED:
-            packet = SSTPDataPacket(frame)
-            packet.write_to(self.transport.write)
-
-
-    def write_ppp_data_frame(self, frame):
-        if __debug__:
-            logging.debug('pppd => sstp [data frame] (%s bytes).', len(frame))
-            logging.log(VERBOSE, hexdump(frame))
-        if self.state is State.SERVER_CALL_CONNECTED:
-            packet = SSTPDataPacket(frame)
-            packet.write_to(self.transport.write)
-
+    def write_ppp_frames(self, frames):
+        if self.state is State.SERVER_CALL_CONNECTED_PENDING:
+            frames = [f for f in frames if is_ppp_control_frame(f)]
+        elif self.state is not State.SERVER_CALL_CONNECTED:
+            return
+        for frame in frames:
+            if __debug__:
+                logging.debug('pppd => sstp (%d bytes)', len(frame))
+                logging.log(VERBOSE, hexdump(frame))
+            SSTPDataPacket(frame).write_to(self.transport.write)
 
     def ppp_stopped(self):
         if (self.state is not State.SERVER_CONNECT_REQUEST_PENDING and
