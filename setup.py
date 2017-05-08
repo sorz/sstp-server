@@ -1,8 +1,15 @@
 #!/usr/bin/env python2
+from __future__ import print_function
+import sys
 from setuptools import setup, Extension
 
 from sstpd import __version__ as version
 
+
+if sys.version_info > (3, ):
+    print("""\nthis version of sstp-server is for Python 2.7,
+please install v0.5 or above for Python 3.""", file=sys.stderr)
+    sys.exit(1)
 
 with open('README.rst') as readme:
     long_description = readme.read()
@@ -34,6 +41,7 @@ setup(
         'Topic :: Internet :: Proxy Servers',
         'License :: OSI Approved :: MIT License'
     ],
-    long_description=long_description
+    long_description=long_description,
+    python_requires='==2.7.*'
 )
 
