@@ -3,14 +3,16 @@ sstp-server
 |PyPI version|
 |Build Status|
 
-A Secure Socket Tunneling Protocol (SSTP) server implemented by Python/Twisted.
+A Secure Socket Tunneling Protocol (SSTP) server implemented by Python.
 
 
 Requirements
 ------------
 
-* Python 2.7
+* Python >= 3.4.4
 * pppd
+
+For Python 2.7, use v0.4.x
 
 Install
 -------
@@ -20,6 +22,7 @@ Install from PyPI:
 
     # pip install sstp-server
 
+Please ensure your pip >= 9.0.1 to get correct version.
 
 Install from GitHub:
 ::
