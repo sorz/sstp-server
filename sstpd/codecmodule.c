@@ -56,6 +56,7 @@ static u16 fcstab[256] = {
 #define FLAG_SEQUENCE    0x7e
 #define CONTROL_ESCAPE   0x7d
 
+#define MAX_FRAME_SIZE   2048
 
 static inline void
 escape_to(unsigned char byte, unsigned char* out, int* pos)
@@ -126,8 +127,10 @@ PppDecoder_unescape(PppDecoder *self, PyObject *args)
         return NULL;
 
     frames = PyList_New(0);
-    if (!frames)
+    if (!frames) {
+        PyBuffer_Release(&buf_in);
         return NULL;
+    }
 
     data = (char*) buf_in.buf;
     for (i=0; i<buf_in.len; ++i) {
@@ -153,7 +156,7 @@ PppDecoder_unescape(PppDecoder *self, PyObject *args)
             }
             self->frame_buf_pos = 0;
         }
-        else {
+        else if (self->frame_buf_pos < MAX_FRAME_SIZE) {
             self->frame_buf[self->frame_buf_pos++] = data[i];
         }
     }
@@ -175,7 +178,7 @@ PppDecoder_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     PppDecoder *self;
     self = (PppDecoder *)type->tp_alloc(type, 0);
     if (self != NULL) {
-        self->frame_buf = malloc(sizeof(char[1502]));
+        self->frame_buf = malloc(sizeof(char[MAX_FRAME_SIZE]));
         if (!self->frame_buf) {
             Py_DECREF(self);
             return PyErr_NoMemory();
