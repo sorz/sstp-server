@@ -2,6 +2,7 @@
 import sys
 import logging
 import argparse
+from socket import IPPROTO_TCP, TCP_NODELAY
 from configparser import SafeConfigParser, NoSectionError
 import ssl
 import asyncio
@@ -153,6 +154,10 @@ def main():
                                   args.listen_port,
                                   ssl=ssl_ctx)
     server = loop.run_until_complete(coro)
+
+    if not on_unix_socket:
+        for sock in server.sockets:
+            sock.setsockopt(IPPROTO_TCP, TCP_NODELAY, 1)
 
     if args.proxy_protocol:
         logging.info('PROXY PROTOCOL is activated.')
