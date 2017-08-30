@@ -179,10 +179,13 @@ class SSTPProtocol(Protocol):
             self.sstp_call_connect_request_received(protocolId)
         elif msg_type == MsgType.CALL_CONNECTED:
             attr = attributes[0][1]
-            hash_type = attr[3:4]
+            hash_type = attr[3]
             nonce = attr[4:36]
             cert_hash = attr[36:68]
-            mac_hash = attr[68:72]
+            mac_hash = attr[68:100]
+            if hash_type == CERT_HASH_PROTOCOL_SHA1:
+                cert_hash = cert_hash[:20]
+                mac_hash = mac_hash[:20]
             self.sstp_call_connected_received(hash_type, nonce,
                                               cert_hash, mac_hash)
         elif msg_type == MsgType.CALL_ABORT:
