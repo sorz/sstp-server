@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
 import sys
+import ssl
+import asyncio
 import logging
 import argparse
 from socket import IPPROTO_TCP, TCP_NODELAY
 from configparser import SafeConfigParser, NoSectionError
-import ssl
-import asyncio
+from binascii import hexlify
 try:
     import uvloop
 except ImportError:
     uvloop = None
 
 from . import __doc__
+from . import certtool
 from .sstp import SSTPProtocolFactory
 from .address import IPPool
 
@@ -123,16 +125,18 @@ def main():
 
     if args.no_ssl:
         ssl_ctx = None
-        cert_hash = None
         logging.info('Running without SSL.')
     else:
         ssl_ctx = _load_cert(args.pem_cert, args.pem_key)
         if args.ciphers:
             ssl_ctx.set_ciphers(args.ciphers)
-        #sha1 = cert.digest('sha1').replace(':', '').decode('hex')
-        #sha256 = cert.digest('sha256').replace(':', '').decode('hex')
-        # TODO: set cert hash on cert_hash[sha1, sha256]
+    if args.pem_cert:
+        cert_hash = certtool.get_fingerprint(args.pem_cert)
+        logging.debug('Cert SHA-1: %s', hexlify(cert_hash.sha1).decode())
+        logging.debug('Cert SHA-256: %s', hexlify(cert_hash.sha256).decode())
+    else:
         cert_hash = None
+        logging.warning('--pem_cert not given, hash checking disabled')
     on_unix_socket = args.listen.startswith('/')
 
     if uvloop is None:
