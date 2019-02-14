@@ -1,3 +1,5 @@
+[![FOSSA Status](https://app.fossa.io/api/projects/git%2Bgithub.com%2Fsorz%2Fsstp-server.svg?type=shield)](https://app.fossa.io/projects/git%2Bgithub.com%2Fsorz%2Fsstp-server?ref=badge_shield)
+
 sstp-server
 ============
 |PyPI version|
@@ -80,3 +82,7 @@ Copyright (c) 2014-2017 Shell Chen
 
 .. |Build Status| image:: https://travis-ci.org/sorz/sstp-server.svg?branch=master
         :target: https://travis-ci.org/sorz/sstp-server
+
+
+## License
+[![FOSSA Status](https://app.fossa.io/api/projects/git%2Bgithub.com%2Fsorz%2Fsstp-server.svg?type=large)](https://app.fossa.io/projects/git%2Bgithub.com%2Fsorz%2Fsstp-server?ref=badge_large)
