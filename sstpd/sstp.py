@@ -62,7 +62,7 @@ class SSTPProtocol(Protocol):
 
 
     def data_received(self, data):
-        if self.state is State.SERVER_CALL_DISCONNECTED:
+        if self.state == State.SERVER_CALL_DISCONNECTED:
             if self.proxy_protocol_passed:
                 self.http_data_received(data)
             else:
@@ -145,7 +145,7 @@ class SSTPProtocol(Protocol):
 
     def sstp_packet_received(self, packet):
         c = packet[1] & 0x01
-        if c is 0:  # Data packet
+        if c == 0:  # Data packet
             self.sstp_data_packet_received(packet[4:])
         else:  # Control packet
             msg_type = packet[4:6].tobytes()
@@ -215,7 +215,7 @@ class SSTPProtocol(Protocol):
                 State.CALL_DISCONNECT_ACK_PENDING,
                 State.CALL_DISCONNECT_TIMEOUT_PENDING):
             return
-        if self.state is not State.SERVER_CONNECT_REQUEST_PENDING:
+        if self.state != State.SERVER_CONNECT_REQUEST_PENDING:
             logging.warn('Not in the state.')
             self.transport.close()
             return
@@ -269,7 +269,7 @@ class SSTPProtocol(Protocol):
                 State.CALL_DISCONNECT_ACK_PENDING,
                 State.CALL_DISCONNECT_TIMEOUT_PENDING):
             return
-        if self.state is not State.SERVER_CALL_CONNECTED_PENDING:
+        if self.state != State.SERVER_CALL_CONNECTED_PENDING:
             self.abort(ATTRIB_STATUS_UNACCEPTED_FRAME_RECEIVED)
         # TODO: check cert_hash and mac_hash
         logging.debug("Received cert hash: %s", hexlify(cert_hash).decode())
@@ -298,7 +298,7 @@ class SSTPProtocol(Protocol):
                 State.CALL_DISCONNECT_TIMEOUT_PENDING):
             return
         logging.warn("Call abort.")
-        if self.state is State.CALL_ABORT_PENDING:
+        if self.state == State.CALL_ABORT_PENDING:
             self.loop.call_later(1, self.transport.close)
             return
         self.state = State.CALL_ABORT_IN_PROGRESS_2
@@ -321,7 +321,7 @@ class SSTPProtocol(Protocol):
         self.loop.call_later(1, self.transport.close)
 
     def sstp_msg_call_disconnect_ack(self):
-        if self.state is State.CALL_DISCONNECT_ACK_PENDING:
+        if self.state == State.CALL_DISCONNECT_ACK_PENDING:
             self.transport.close()
         elif self.state in (State.CALL_ABORT_PENDING,
                 State.CALL_ABORT_TIMEOUT_PENDING,
@@ -332,7 +332,7 @@ class SSTPProtocol(Protocol):
 
 
     def sstp_msg_echo_request(self):
-        if self.state is State.SERVER_CALL_CONNECTED:
+        if self.state == State.SERVER_CALL_CONNECTED:
             response = SSTPControlPacket(MsgType.ECHO_RESPONSE)
             response.write_to(self.transport.write)
         elif self.state in (State.CALL_ABORT_TIMEOUT_PENDING,
@@ -345,7 +345,7 @@ class SSTPProtocol(Protocol):
 
 
     def sstp_msg_echo_response(self):
-        if self.state is State.SERVER_CALL_CONNECTED:
+        if self.state == State.SERVER_CALL_CONNECTED:
             self.reset_hello_timer()
         elif self.state in (State.CALL_ABORT_TIMEOUT_PENDING,
                 State.CALL_ABORT_PENDING,
@@ -356,7 +356,7 @@ class SSTPProtocol(Protocol):
             self.abort(ATTRIB_STATUS_UNACCEPTED_FRAME_RECEIVED)
 
     def hello_timer_expired(self, close):
-        if self.state is State.SERVER_CALL_DISCONNECTED:
+        if self.state == State.SERVER_CALL_DISCONNECTED:
             self.transport.close()  # TODO: follow HTTP
         elif close:
             logging.warn('Ping time out.')
@@ -393,9 +393,9 @@ class SSTPProtocol(Protocol):
         self.loop.call_later(3, self.transport.close)
 
     def write_ppp_frames(self, frames):
-        if self.state is State.SERVER_CALL_CONNECTED_PENDING:
+        if self.state == State.SERVER_CALL_CONNECTED_PENDING:
             frames = [f for f in frames if is_ppp_control_frame(f)]
-        elif self.state is not State.SERVER_CALL_CONNECTED:
+        elif self.state != State.SERVER_CALL_CONNECTED:
             return
         for frame in frames:
             if __debug__:
@@ -404,9 +404,9 @@ class SSTPProtocol(Protocol):
             SSTPDataPacket(frame).write_to(self.transport.write)
 
     def ppp_stopped(self):
-        if (self.state is not State.SERVER_CONNECT_REQUEST_PENDING and
-                self.state is not State.SERVER_CALL_CONNECTED_PENDING and
-                self.state is not State.SERVER_CALL_CONNECTED):
+        if (self.state != State.SERVER_CONNECT_REQUEST_PENDING and
+                self.state != State.SERVER_CALL_CONNECTED_PENDING and
+                self.state != State.SERVER_CALL_CONNECTED):
             self.transport.close()
             return
         self.state = State.CALL_DISCONNECT_IN_PROGRESS_1
