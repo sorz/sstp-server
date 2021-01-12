@@ -72,7 +72,7 @@ class SSTPProtocol(Protocol):
 
 
     def connection_lost(self, reason):
-        logging.debug('Connection finished.')
+        logging.info('Connection finished.')
         if self.pppd is not None and self.pppd.transport is not None:
             self.pppd.transport.close()
             if self.factory.remote_pool is not None:
