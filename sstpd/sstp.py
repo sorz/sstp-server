@@ -77,6 +77,7 @@ class SSTPProtocol(Protocol):
             self.pppd.transport.close()
             if self.factory.remote_pool is not None:
                 self.factory.remote_pool.unregister(self.pppd.remote)
+                logging.info('Unregistered address %s', self.pppd.remote);
         self.hello_timer.cancel()
 
 
@@ -241,6 +242,7 @@ class SSTPProtocol(Protocol):
                              'Cannot accpet new connection.')
                 self.abort()
                 return
+            logging.info('Registered address %s', remote);
 
         address_argument = '%s:%s' % (self.factory.local, remote)
         args = ['notty', 'file', self.factory.pppd_config_file,
