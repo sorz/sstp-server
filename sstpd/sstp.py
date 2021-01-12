@@ -8,6 +8,8 @@ from functools import partial
 from binascii import hexlify
 import subprocess
 import tempfile
+import hmac
+import hashlib
 
 from . import __version__
 from .constants import *
@@ -55,6 +57,10 @@ class SSTPProtocol(Protocol):
         self.remote_host = None
         # PPP SSTP API
         self.ppp_sstp = None
+        # High(er) LAyer Key (HLAK)
+        self.hlak = None
+        # Client Compound MAC
+        self.client_cmac = None
 
 
     def connection_made(self, transport):
@@ -345,25 +351,94 @@ class SSTPProtocol(Protocol):
             self.abort(ATTRIB_STATUS_UNACCEPTED_FRAME_RECEIVED)
             return
 
-        # TODO: check cert_hash and mac_hash
         logging.debug("Received certificate %s hash: %s",
                 ("SHA1", "SHA256")[hash_type == CERT_HASH_PROTOCOL_SHA256],
                 hexlify(cert_hash).decode())
         logging.debug("Received MAC hash: %s", hexlify(mac_hash).decode())
 
         if nonce != self.nonce:
-            logging.warn('Received wrong nonce.')
+            logging.error('Received wrong nonce.')
             self.abort(ATTRIB_STATUS_INVALID_FRAME_RECEIVED)
             return
-        self.nonce = None
 
         if self.factory.cert_hash is not None \
                 and cert_hash not in self.factory.cert_hash:
-            logging.warning("Certificate hash mismatch between server's "
+            logging.error("Certificate hash mismatch between server's "
                             "and client's. Reject this connection.")
             self.abort(ATTRIB_STATUS_INVALID_FRAME_RECEIVED)
             return
 
+        if not self.should_verify_crypto_binding():
+            logging.debug("No crypto binding needed.")
+            self.state = State.SERVER_CALL_CONNECTED
+            logging.info('Connection established.')
+            return
+
+        if self.hlak is None:
+            logging.warning("Waiting for the Higher Layer Authentication "
+                    "Key (HLAK) to verify Crypto Binding.")
+            self.client_cmac = mac_hash
+            return
+
+        self.sstp_call_connected_crypto_binding(mac_hash)
+
+
+    def sstp_call_connected_crypto_binding(self, mac_hash):
+        if self.hlak is None:
+            logging.error("Failed to verify Crypto Binding, as the "
+                    "Higher Layer Authentication Key is missing.")
+            self.abort(ATTRIB_STATUS_INVALID_FRAME_RECEIVED)
+            return
+
+        hash_type = (CERT_HASH_PROTOCOL_SHA1,
+                CERT_HASH_PROTOCOL_SHA256)[len(mac_hash) == 32]
+
+        # Compound MAC Key (CMK) seed
+        cmk_seed = b'SSTP inner method derived CMK'
+        cmk_digest = (hashlib.sha1, hashlib.sha256)\
+                [hash_type == CERT_HASH_PROTOCOL_SHA256]
+
+        # T1 = HMAC(HLAK, S | LEN | 0x01)
+        t1 = hmac.new(self.hlak, digestmod=cmk_digest)
+
+        # CMK len (length of digest) - 16-bits little endian
+        cmk_len = bytes((t1.digest_size, 0))
+
+        t1.update(cmk_seed)
+        t1.update(cmk_len)
+        t1.update(b'\x01')
+
+        cmk = t1.digest()
+        if __debug__:
+            logging.debug("Crypto Binding CMK %s", t1.hexdigest())
+
+        # reconstruct Call Connect message with zeroed CMAC field
+        cc_msg = bytes((0x10, 0x01, 0x00, 0x70))
+        cc_msg += MsgType.CALL_CONNECTED
+        # number of attributes + reserved
+        cc_msg += bytes((0x00, 0x01, 0x00))
+        cc_msg += SSTP_ATTRIB_CRYPTO_BINDING
+        # attr length + reserved
+        cc_msg += bytes((0x00, 0x68, 0x00, 0x00, 0x00))
+        cc_msg += bytes([hash_type])
+        cc_msg += self.nonce
+        cc_msg += self.factory.cert_hash[hash_type == CERT_HASH_PROTOCOL_SHA256]
+        # [padding + ] zeroed cmac [+ padding]
+        cc_msg += bytes(0x70 - len(cc_msg))
+
+        # CMAC = HMAC(CMK, CC_MSG)
+        cmac = hmac.new(cmk, digestmod=cmk_digest)
+        cmac.update(cc_msg)
+
+        if __debug__:
+            logging.debug("Crypto Binding CMAC %s", cmac.hexdigest())
+
+        if not hmac.compare_digest(cmac.digest(), mac_hash):
+            logging.error("Crypto Binding is invalid.")
+            self.abort(ATTRIB_STATUS_INVALID_FRAME_RECEIVED)
+            return
+
+        logging.info("Crypto Binding is valid.")
         self.state = State.SERVER_CALL_CONNECTED
         logging.info('Connection established.')
 
@@ -491,6 +566,24 @@ class SSTPProtocol(Protocol):
         self.state = State.CALL_DISCONNECT_ACK_PENDING
         self.loop.call_later(3, self.transport.close)
 
+    def higher_layer_authentication_key(self, send_key, recv_key):
+        # [MS-SSTP] 3.2.5.2 - crypto binding - server mode
+        hlak = recv_key + send_key
+        # ensure hlak is 32 bytes long
+        if len(hlak) < 32:
+            hlak += bytes(32 - len(hlak))
+        self.hlak = hlak[0:32]
+
+        logging.info("Received Higher Layer Authentication Key.")
+        logging.debug("Configured HLAK as %s", self.hlak.hex())
+
+        self.ppp_sstp_api_close()
+
+        if self.client_cmac is not None:
+            self.sstp_call_connected_crypto_binding(self.client_cmac)
+
+    def should_verify_crypto_binding(self):
+        return (self.factory.pppd_sstp_api_plugin is not None)
 
 class SSTPProtocolFactory:
     protocol = SSTPProtocol

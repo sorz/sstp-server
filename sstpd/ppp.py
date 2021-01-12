@@ -214,6 +214,8 @@ class PPPDSSTPAPIProtocol(asyncio.Protocol):
                 logging.error("SSTP API message - missing master "
                         "send and/or receive key.")
                 return
+        self.sstp.higher_layer_authentication_key(
+                self.master_send_key, self.master_recv_key)
 
     def close(self):
         logging.info('Finished PPP SSTP API protocol.')
