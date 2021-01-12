@@ -239,7 +239,7 @@ class SSTPProtocol(Protocol):
             remote = self.factory.remote_pool.apply()
             if remote is None:
                 logging.warn('IP address pool is full. '
-                             'Cannot accpet new connection.')
+                             'Cannot accept new connection.')
                 self.abort()
                 return
             logging.info('Registered address %s', remote);
