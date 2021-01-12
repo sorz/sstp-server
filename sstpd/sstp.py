@@ -128,7 +128,8 @@ class SSTPProtocol(Protocol):
             if len(self.receive_buf) > HTTP_REQUEST_BUFFER_SIZE:
                 close('Request too large, may not a valid HTTP request.')
             return
-        request_line = self.receive_buf.split(b'\r\n')[0]
+        headers = self.receive_buf.split(b'\r\n')
+        request_line = headers[0]
         self.receive_buf.clear()
         try:
             method, uri, version = request_line.split()
@@ -138,6 +139,13 @@ class SSTPProtocol(Protocol):
             return close('Unexpected HTTP method (%s) and/or version (%s).',
                          method.decode(errors='replace'),
                          version.decode(errors='replace'))
+        for header in filter(lambda x: b'x-forwarded-for' in x.lower(), headers):
+            try:
+                hosts = header.decode('ascii').split(':')[1]
+                host = hosts.split(',')[0]
+                self.remote_host = host.strip()
+            except:
+                pass
         self.transport.write(b'HTTP/1.1 200 OK\r\n'
                 b'Content-Length: 18446744073709551615\r\n'
                 b'Server: SSTP-Server/%s\r\n\r\n' % str(__version__).encode())
