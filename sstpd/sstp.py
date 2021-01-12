@@ -74,7 +74,14 @@ class SSTPProtocol(Protocol):
     def connection_lost(self, reason):
         logging.debug('Connection finished.')
         if self.pppd is not None and self.pppd.transport is not None:
-            self.pppd.transport.close()
+            try:
+                self.pppd.transport.terminate()
+            except ProcessLookupError:
+                logging.warning('PPP process is gone already')
+                pass
+            except Exception as e:
+                logging.warning('Unexpected exception %s', str(e))
+                pass
             if self.factory.remote_pool is not None:
                 self.factory.remote_pool.unregister(self.pppd.remote)
                 logging.info('Unregistered address %s', self.pppd.remote);
