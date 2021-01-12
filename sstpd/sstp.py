@@ -6,12 +6,14 @@ from enum import Enum
 from asyncio import Protocol
 from functools import partial
 from binascii import hexlify
+import subprocess
+import tempfile
 
 from . import __version__
 from .constants import *
 from .packets import SSTPDataPacket, SSTPControlPacket
 from .utils import hexdump
-from .ppp import PPPDProtocol, PPPDProtocolFactory, is_ppp_control_frame
+from .ppp import PPPDProtocol, PPPDProtocolFactory, is_ppp_control_frame, PPPDSSTPPluginFactory
 from .proxy_protocol import parse_pp_header, PPException, PPNoEnoughData
 
 
@@ -51,6 +53,8 @@ class SSTPProtocol(Protocol):
         self.reset_hello_timer()
         self.proxy_protocol_passed = False
         self.remote_host = None
+        # PPP SSTP API
+        self.ppp_sstp = None
 
 
     def connection_made(self, transport):
@@ -78,6 +82,7 @@ class SSTPProtocol(Protocol):
             if self.factory.remote_pool is not None:
                 self.factory.remote_pool.unregister(self.pppd.remote)
         self.hello_timer.cancel()
+        self.ppp_sstp_api_close()
 
 
     def proxy_protocol_data_received(self, data):
@@ -273,6 +278,19 @@ class SSTPProtocol(Protocol):
         address_argument = '%s:%s' % (self.factory.local, remote)
         args = ['notty', 'file', self.factory.pppd_config_file,
                 '115200', address_argument]
+        if self.factory.pppd_sstp_api_plugin is not None:
+            # create a unique socket filename
+            ppp_sock = tempfile.NamedTemporaryFile(
+                    prefix='ppp-sstp-api-', suffix='.sock')
+            args += ['plugin', self.factory.pppd_sstp_api_plugin,
+                    'sstp-sock', ppp_sock.name]
+            ppp_event = self.loop.create_unix_server(
+                    PPPDSSTPPluginFactory(callback=self),
+                    path=ppp_sock.name)
+            ppp_sock.close()
+            task = asyncio.create_task(ppp_event)
+            task.add_done_callback(self.ppp_sstp_api)
+
         if self.remote_host is not None:
             args += ['remotenumber', self.remote_host]
 
@@ -291,6 +309,31 @@ class SSTPProtocol(Protocol):
         transport, protocol = task.result()
         self.pppd = protocol
         self.pppd.resume_producing()
+
+    def ppp_sstp_api(self, task):
+        err = task.exception()
+        if err is not None:
+            logging.warning("Fail to start PPP SSTP API: %s", err)
+            self.abort()
+            return
+        server = task.result()
+        self.ppp_sstp = server
+
+    def ppp_sstp_api_close(self):
+        if self.ppp_sstp is not None:
+            socks = list(map(lambda s: s.getsockname(), self.ppp_sstp.sockets))
+
+            logging.debug("Close PPP SSTP API.")
+            self.ppp_sstp.close()
+
+            for sock in socks:
+                try:
+                    logging.debug("Remove SSTP API sock %s", sock)
+                    os.remove(sock)
+                except:
+                    pass
+
+            self.ppp_sstp = None
 
     def sstp_call_connected_received(self, hash_type, nonce, cert_hash, mac_hash):
         if self.state in (State.CALL_ABORT_TIMEOUT_PENDING,
@@ -455,6 +498,13 @@ class SSTPProtocolFactory:
     def __init__(self, config, remote_pool, cert_hash=None):
         self.pppd = config.pppd
         self.pppd_config_file = config.pppd_config
+        # detect ppp_sstp_api_plugin
+        ppp_sstp_api_plugin = 'sstp-pppd-plugin.so'
+        has_plugin = subprocess.run(
+                [self.pppd, 'plugin', ppp_sstp_api_plugin, 'notty', 'dryrun'],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.pppd_sstp_api_plugin = (None, ppp_sstp_api_plugin)\
+                [has_plugin.returncode == 0]
         self.local = config.local
         self.proxy_protocol = config.proxy_protocol
         self.remote_pool = remote_pool
