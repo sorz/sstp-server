@@ -240,6 +240,7 @@ class SSTPProtocol(Protocol):
                 logging.warn('IP address pool is full. '
                              'Cannot accpet new connection.')
                 self.abort()
+                return
 
         address_argument = '%s:%s' % (self.factory.local, remote)
         args = ['notty', 'file', self.factory.pppd_config_file,
