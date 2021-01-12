@@ -153,7 +153,7 @@ class SSTPProtocol(Protocol):
             attributes = []
             attrs = packet[8:]
             while len(attributes) < num_attrs:
-                id = attrs[1]
+                id = attrs[1:2]
                 length = parse_length(attrs[2:4])
                 value = attrs[4:length]
                 attrs = attrs[length:]
@@ -179,13 +179,36 @@ class SSTPProtocol(Protocol):
             self.sstp_call_connect_request_received(protocolId)
         elif msg_type == MsgType.CALL_CONNECTED:
             attr = attributes[0][1]
+            attr_obj = next(
+                (a for a in attributes if a[0] == SSTP_ATTRIB_CRYPTO_BINDING),
+                None
+            )
+            if attr_obj is None:
+                logging.warn('Crypto Binding Attribute '
+                        'expected in Call Connect')
+                self.abort(ATTRIB_STATUS_INVALID_FRAME_RECEIVED)
+                return
+            attr = attr_obj[1]
+            if len(attr) != 0x64:
+                # MS-SSTP : 2.2.7 Crypto Binding Attribute
+                logging.warn('Crypto Binding Attribute length '
+                        'MUST be 104 (0x068)')
+                self.abort(ATTRIB_STATUS_INVALID_FRAME_RECEIVED)
+                return
             hash_type = attr[3]
             nonce = attr[4:36]
-            cert_hash = attr[36:68]
-            mac_hash = attr[68:100]
             if hash_type == CERT_HASH_PROTOCOL_SHA1:
-                cert_hash = cert_hash[:20]
-                mac_hash = mac_hash[:20]
+                # strip and ignore padding
+                cert_hash = attr[36:56]
+                mac_hash = attr[68:88]
+            elif hash_type == CERT_HASH_PROTOCOL_SHA256:
+                cert_hash = attr[36:68]
+                mac_hash = attr[68:100]
+            else:
+                logging.warn('Unsupported hash protocol in Crypto '
+                    'Binding Attribute.')
+                self.abort(ATTRIB_STATUS_INVALID_FRAME_RECEIVED)
+                return
             self.sstp_call_connected_received(hash_type, nonce,
                                               cert_hash, mac_hash)
         elif msg_type == MsgType.CALL_ABORT:
@@ -228,9 +251,15 @@ class SSTPProtocol(Protocol):
             return
         self.nonce = os.urandom(32)
         ack = SSTPControlPacket(MsgType.CALL_CONNECT_ACK)
-        # 3 bytes reserved + 1 byte hash bitmap (SHA-1 only) + nonce.
+        # hash protocol bitmask
+        hpb = 0
+        if len(self.factory.cert_hash.sha1) > 0:
+            hpb |= CERT_HASH_PROTOCOL_SHA1
+        if len(self.factory.cert_hash.sha256) > 0:
+            hpb |= CERT_HASH_PROTOCOL_SHA256
+        # 3 bytes reserved + 1 byte hash bitmap + nonce.
         ack.attributes = [(SSTP_ATTRIB_CRYPTO_BINDING_REQ,
-                b'\x00\x00\x00' + b'\x03' + self.nonce)]
+                b'\x00\x00\x00' + bytes([hpb]) + self.nonce)]
         ack.write_to(self.transport.write)
 
         remote = ''
@@ -274,9 +303,10 @@ class SSTPProtocol(Protocol):
             return
 
         # TODO: check cert_hash and mac_hash
-        logging.debug("Received cert hash: %s", hexlify(cert_hash).decode())
+        logging.debug("Received certificate %s hash: %s",
+                ("SHA1", "SHA256")[hash_type == CERT_HASH_PROTOCOL_SHA256],
+                hexlify(cert_hash).decode())
         logging.debug("Received MAC hash: %s", hexlify(mac_hash).decode())
-        logging.debug("Hash type: %s", hash_type)
 
         if nonce != self.nonce:
             logging.warn('Received wrong nonce.')
