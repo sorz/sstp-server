@@ -271,6 +271,8 @@ class SSTPProtocol(Protocol):
             return
         if self.state != State.SERVER_CALL_CONNECTED_PENDING:
             self.abort(ATTRIB_STATUS_UNACCEPTED_FRAME_RECEIVED)
+            return
+
         # TODO: check cert_hash and mac_hash
         logging.debug("Received cert hash: %s", hexlify(cert_hash).decode())
         logging.debug("Received MAC hash: %s", hexlify(mac_hash).decode())
