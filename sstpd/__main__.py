@@ -83,6 +83,10 @@ def _get_args():
             metavar='NETWORK',
             help="Enable internal IP management. Client's IP will be selected "
                  "from NETWORK (e.g. 192.168.20.0/24).")
+    parser.add_argument('--range',
+            metavar='RANGE',
+            help="Limit remote NETWORK to given RANGE (e.g. 192.168.20.10-20 "
+            "or 192.168.20.10-192.168.20.20)")
     parser.add_argument('--ciphers',
             metavar="CIPHER-LIST",
             help='Custom OpenSSL cipher suite. See ciphers(1).')
@@ -119,9 +123,11 @@ def main():
     logging.addLevelName(5, 'VERBOSE')
 
     if args.remote:
-        ippool = IPPool(args.remote)
+        ippool = IPPool(args.remote, args.range)
         ippool.register(args.local)
     else:
+        if args.range:
+            logging.warning('RANGE given without remote NETWORK - ignored.')
         ippool = None
 
     if args.no_ssl:

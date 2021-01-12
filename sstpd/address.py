@@ -3,11 +3,29 @@ import ipaddress
 
 class IPPool:
 
-    def __init__(self, network):
+    def __init__(self, network, range = None):
         self._pool = []
         self._capacity = None
         self._network = ipaddress.ip_network(network)
-        self._hosts = self._network.hosts()
+        self._first = self._network.network_address+1
+        self._last = self._network.broadcast_address-1
+        if range:
+            r_err = ValueError("Range "+range+" not in network "+network)
+            first, last = range.split("-")
+            if self._network.overlaps(ipaddress.ip_network(first)):
+                self._first = ipaddress.ip_address(first)
+            else:
+                raise r_err
+            if last:
+                try:
+                    if self._network.overlaps(ipaddress.ip_network(last)):
+                        self._last = ipaddress.ip_address(last)
+                    else:
+                        raise r_err
+                except ValueError as err:
+                    if err != r_err:
+                        self._last = self._network.network_address+int(last)
+        self.reset()
 
 
     def _next_host(self):
@@ -51,7 +69,12 @@ class IPPool:
 
 
     def reset(self):
-        self._hosts = self._network.hosts()
+        self._hosts = filter(
+            lambda host:
+                host >= self._first and
+                host <= self._last,
+            self._network.hosts()
+        )
 
 
 class RegisteredException(Exception):
