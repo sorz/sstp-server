@@ -14,6 +14,8 @@ Requirements
 
 For Python 2.7, use v0.4.x
 
+**Crypto Binding** is supported using *SSTP ppp API* plug-in sstp-pppd-plugin.so from `sstp-client <http://sstp-client.sourceforge.net/>`_.
+
 Install
 -------
 
@@ -65,7 +67,6 @@ Or:
 Known Issues
 ------------
 
-- Not implemented *Crypto Binding* yet. Potential MITM attack risk exists.
 - High CPU usage, may not suitable for high thougthput applications.
 
 License
