@@ -59,6 +59,8 @@ class SSTPProtocol(Protocol):
         peer = self.transport.get_extra_info("peername")
         if hasattr(peer, 'host'):
             self.remote_host = str(peer.host)
+        elif type(peer) == tuple:
+            self.remote_host = peer[0]
 
 
     def data_received(self, data):
