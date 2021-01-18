@@ -52,7 +52,8 @@ def _get_args():
     parser.set_defaults(**defaults)
     parser.add_argument('-l', '--listen',
             metavar='ADDRESS',
-            help='The address to bind to, default to all. Either IP address '
+            help='The address to bind to, default to all. Either '
+                 'comma-separated list of IP addresses '
                  'or a path start with "/" for a UNIX domain socket.')
     parser.add_argument('-p', '--listen-port',
             type=int, metavar='PORT')
@@ -154,7 +155,7 @@ def main():
                                        ssl=ssl_ctx)
     else:
         coro = loop.create_server(factory,
-                                  args.listen,
+                                  args.listen.split(','),
                                   args.listen_port,
                                   ssl=ssl_ctx)
     server = loop.run_until_complete(coro)
@@ -168,7 +169,8 @@ def main():
     if on_unix_socket:
         logging.info('Listening on %s...', args.listen)
     else:
-        logging.info('Listening on %s:%s...', args.listen, args.listen_port)
+        for addr in args.listen.split(','):
+            logging.info('Listening on %s:%s...', addr, args.listen_port)
     try:
         loop.run_forever()
     except KeyboardInterrupt:
