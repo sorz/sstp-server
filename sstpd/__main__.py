@@ -133,8 +133,8 @@ def main():
             ssl_ctx.set_ciphers(args.ciphers)
     if args.pem_cert:
         cert_hash = certtool.get_fingerprint(args.pem_cert)
-        logging.debug('Cert SHA-1: %s', hexlify(cert_hash.sha1).decode())
-        logging.debug('Cert SHA-256: %s', hexlify(cert_hash.sha256).decode())
+        logging.info('Cert SHA-1: %s', hexlify(cert_hash.sha1).decode())
+        logging.info('Cert SHA-256: %s', hexlify(cert_hash.sha256).decode())
     else:
         cert_hash = None
         logging.warning('--pem_cert not given, hash checking disabled')
