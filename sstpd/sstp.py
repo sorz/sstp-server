@@ -76,9 +76,17 @@ class SSTPProtocol(Protocol):
     def connection_lost(self, reason):
         logging.debug('Connection finished.')
         if self.pppd is not None and self.pppd.transport is not None:
-            self.pppd.transport.close()
+            try:
+                self.pppd.transport.terminate()
+            except ProcessLookupError:
+                logging.warning('PPP process is gone already')
+                pass
+            except Exception as e:
+                logging.warning('Unexpected exception %s', str(e))
+                pass
             if self.factory.remote_pool is not None:
                 self.factory.remote_pool.unregister(self.pppd.remote)
+                logging.info('Unregistered address %s', self.pppd.remote);
         self.hello_timer.cancel()
 
 
@@ -240,8 +248,10 @@ class SSTPProtocol(Protocol):
             remote = self.factory.remote_pool.apply()
             if remote is None:
                 logging.warn('IP address pool is full. '
-                             'Cannot accpet new connection.')
+                             'Cannot accept new connection.')
                 self.abort()
+                return
+            logging.info('Registered address %s', remote);
 
         address_argument = '%s:%s' % (self.factory.local, remote)
         args = ['notty', 'file', self.factory.pppd_config_file,
