@@ -143,7 +143,8 @@ class SSTPProtocol(Protocol):
             try:
                 hosts = header.decode('ascii').split(':')[1]
                 host = hosts.split(',')[0]
-                self.remote_host = host.strip()
+                if self.factory.use_http_proxy:
+                    self.remote_host = host.strip()
             except:
                 pass
         self.transport.write(b'HTTP/1.1 200 OK\r\n'
@@ -620,6 +621,7 @@ class SSTPProtocolFactory:
                 [has_plugin.returncode == 0]
         self.local = config.local
         self.proxy_protocol = config.proxy_protocol
+        self.use_http_proxy = (config.no_ssl and not config.proxy_protocol)
         self.remote_pool = remote_pool
         self.cert_hash = cert_hash
 

@@ -67,7 +67,8 @@ def _get_args():
     parser.add_argument('-n', '--no-ssl',
             action='store_true',
             help='Use plain HTTP instead of HTTPS. '
-                 'Useful when running behind a reverse proxy.')
+                 'Useful when running behind a reverse proxy.'
+                 'Enables X-Forwarded-For HTTP header processing.')
     parser.add_argument('--proxy-protocol',
             action='store_true',
             help='Enable PROXY PROTOCOL, imply --no-ssl')
