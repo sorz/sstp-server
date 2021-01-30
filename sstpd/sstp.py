@@ -84,7 +84,7 @@ class SSTPProtocol(Protocol):
 
 
     def connection_lost(self, reason):
-        logging.debug('Connection finished.')
+        logging.info('Connection finished.')
         if self.pppd is not None and self.pppd.transport is not None:
             try:
                 self.pppd.transport.terminate()
