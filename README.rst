@@ -14,7 +14,9 @@ Requirements
 
 For Python 2.7, use v0.4.x
 
-**Crypto Binding** is supported using *SSTP ppp API* plug-in sstp-pppd-plugin.so from `sstp-client <http://sstp-client.sourceforge.net/>`_.
+**Crypto Binding** is supported using *SSTP ppp API* plug-in 
+sstp-pppd-plugin.so from
+`sstp-client <http://sstp-client.sourceforge.net/>`_.
 
 Install
 -------
@@ -36,6 +38,14 @@ Arch Linux user may install
 `sstp-server <https://aur.archlinux.org/packages/sstp-server/>`_
 package from AUR.
 
+If you share the authentication with services other than SSTP
+(for example, a RADIUS server that serve both a SSTP and WiFi
+authentication), `crypto binding <https://docs.microsoft.com/en-us/openspecs/
+windows_protocols/ms-sstp/89a68310-0b1e-451b-af9c-0c9ce500bb2e>`_
+is required to prevent MITM attacks. Crypto binding is enabled
+automatically if `sstp-pppd-plugin.so` is avaliable, see
+`#37 <https://github.com/sorz/sstp-server/pull/37
+#issuecomment-761107420>`_ for instructions.
 
 Usage
 -----
@@ -73,7 +83,7 @@ License
 -------
 The MIT License (MIT)
 
-Copyright (c) 2014-2017 Shell Chen
+Copyright (c) 2014-2020 Shell Chen
 
 
 .. |PyPI version| image:: https://img.shields.io/pypi/v/sstp-server.svg?style=flat
@@ -81,3 +91,4 @@ Copyright (c) 2014-2017 Shell Chen
 
 .. |Build Status| image:: https://travis-ci.org/sorz/sstp-server.svg?branch=master
         :target: https://travis-ci.org/sorz/sstp-server
+
