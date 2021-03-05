@@ -54,6 +54,7 @@ class SSTPProtocol(Protocol):
         self.hello_timer = None
         self.reset_hello_timer()
         self.proxy_protocol_passed = False
+        self.correlation_id = None
         self.remote_host = None
         # PPP SSTP API
         self.ppp_sstp = None
@@ -139,6 +140,12 @@ class SSTPProtocol(Protocol):
             return close('Unexpected HTTP method (%s) and/or version (%s).',
                          method.decode(errors='replace'),
                          version.decode(errors='replace'))
+        for header in filter(lambda x: b'sstpcorrelationid:' in x.lower(), headers):
+            try:
+                guid = header.decode('ascii').split(':')[1]
+                self.correlation_id = guid.strip().strip("{}")
+            except:
+                pass
         for header in filter(lambda x: b'x-forwarded-for' in x.lower(), headers):
             try:
                 hosts = header.decode('ascii').split(':')[1]
