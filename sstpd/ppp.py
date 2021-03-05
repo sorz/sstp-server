@@ -1,5 +1,4 @@
 import os
-import logging
 from struct import pack
 import asyncio
 from binascii import hexlify
@@ -45,19 +44,19 @@ class PPPDProtocol(asyncio.SubprocessProtocol):
 
     def out_received(self, data):
         if __debug__:
-            logging.log(VERBOSE, "Raw data: %s", hexdump(data))
+            self.sstp.logging.log(VERBOSE, "Raw data: %s", hexdump(data))
         frames = self.decoder.unescape(data)
         self.sstp.write_ppp_frames(frames)
 
     def err_received(self, data):
-        logging.warn('Received errors from pppd.')
-        logging.warn(data)
+        self.sstp.logging.warn('Received errors from pppd.')
+        self.sstp.logging.warn(data)
 
     def connection_lost(self, err):
         if err is None:
-            logging.debug('pppd closed with EoF')
+            self.sstp.logging.debug('pppd closed with EoF')
         else:
-            logging.info('pppd closed with error: %s', err)
+            self.sstp.logging.info('pppd closed with error: %s', err)
 
     def process_exited(self):
         # uvloop 0.8.0 dosen't call this callback
@@ -67,7 +66,7 @@ class PPPDProtocol(asyncio.SubprocessProtocol):
         if self.exited:
             return
         self.exited = True
-        logging.info('pppd exited with code %s.', returncode)
+        self.sstp.logging.info('pppd exited with code %s.', returncode)
         self.sstp.ppp_stopped()
 
     def pipe_connection_lost(self, fd, exc):
@@ -83,19 +82,19 @@ class PPPDProtocol(asyncio.SubprocessProtocol):
                 pid, returncode = os.waitpid(-1, os.WNOHANG)
                 self._process_exited(-returncode)
             except OSError as e:
-                logging.warning("fail to wait for pppd", e)
+                self.sstp.logging.warning("fail to wait for pppd", e)
         asyncio.get_event_loop().call_later(1, wait_pppd)
 
     def pause_producing(self):
         if not self.paused:
             self.paused = True
-            logging.debug('Pause producting')
+            self.sstp.logging.debug('Pause producting')
             self.read_transport.pause_reading()
 
     def resume_producing(self):
         if self.paused:
             self.paused = False
-            logging.debug('Resume producing')
+            self.sstp.logging.debug('Resume producing')
             self.read_transport.resume_reading()
 
 
@@ -143,7 +142,7 @@ class PPPDSSTPAPIProtocol(asyncio.Protocol):
 
     def connection_made(self, transport):
         sockname = transport.get_extra_info('sockname')
-        logging.info('Initiate PPP SSTP API protocol on %s.', sockname)
+        self.sstp.logging.info('Initiate PPP SSTP API protocol on %s.', sockname)
         self.transport = transport
 
     def message_type(self, mtype):
@@ -167,12 +166,12 @@ class PPPDSSTPAPIProtocol(asyncio.Protocol):
         if self.is_mppe_send_attribute(atype):
             self.master_send_key = adata
             if __debug__:
-                logging.debug("PPP master send key %s",
+                self.sstp.logging.debug("PPP master send key %s",
                         hexlify(self.master_send_key))
         elif self.is_mppe_recv_attribute(atype):
             self.master_recv_key = adata
             if __debug__:
-                logging.debug("PPP master receive key %s",
+                self.sstp.logging.debug("PPP master receive key %s",
                         hexlify(self.master_recv_key))
 
     def message_parse(self, message):
@@ -182,7 +181,7 @@ class PPPDSSTPAPIProtocol(asyncio.Protocol):
                 break
             atype = (message[idx+1] << 8) | message[idx]
             alen = (message[idx+3] << 8) | message[idx+2]
-            logging.debug("SSTP API message - attribute %s (len: %d)",
+            self.sstp.logging.debug("SSTP API message - attribute %s (len: %d)",
                     self.attribute_type(atype), alen)
             idx += 4
             self.handle_attribute(atype, message[idx:idx + alen])
@@ -198,27 +197,27 @@ class PPPDSSTPAPIProtocol(asyncio.Protocol):
         self.transport.write(ack)
         self.close()
         if message[0:4] != magic:
-            logging.error("SSTP API message - invalid magic %a.", message[0:4])
+            self.sstp.logging.error("SSTP API message - invalid magic %a.", message[0:4])
             return
         length = (message[5] << 8) | message[4]
         if length + 8 != len(message):
-            logging.error("SSTP API message - incorrect length.")
+            self.sstp.logging.error("SSTP API message - incorrect length.")
             return
         if not self.message_parse(message[8:]) :
-            logging.error("SSTP API message - failed parsing attributes.")
+            self.sstp.logging.error("SSTP API message - failed parsing attributes.")
             return
         mtype = (message[7] << 8) | message[6]
         if self.is_auth_message(mtype):
             if (self.master_send_key is None or
                     self.master_recv_key is None):
-                logging.error("SSTP API message - missing master "
+                self.sstp.logging.error("SSTP API message - missing master "
                         "send and/or receive key.")
                 return
         self.sstp.higher_layer_authentication_key(
                 self.master_send_key, self.master_recv_key)
 
     def close(self):
-        logging.info('Finished PPP SSTP API protocol.')
+        self.sstp.logging.info('Finished PPP SSTP API protocol.')
         self.transport.close()
 
 
