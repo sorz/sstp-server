@@ -43,7 +43,8 @@ class State(Enum):
 
 class SSTPProtocol(Protocol):
 
-    def __init__(self):
+    def __init__(self, logging):
+        self.logging = logging
         self.loop = asyncio.get_event_loop()
         self.state = State.SERVER_CALL_DISCONNECTED
         self.sstp_packet_len = 0
@@ -62,6 +63,10 @@ class SSTPProtocol(Protocol):
         self.hlak = None
         # Client Compound MAC
         self.client_cmac = None
+
+    def init_logging(self):
+        self.logging = SSTPLogging(self.logging,
+                {'host': self.remote_host, 'id': self.correlation_id })
 
 
     def connection_made(self, transport):
@@ -154,6 +159,7 @@ class SSTPProtocol(Protocol):
                     self.remote_host = host.strip()
             except:
                 pass
+        self.init_logging()
         self.transport.write(b'HTTP/1.1 200 OK\r\n'
                 b'Content-Length: 18446744073709551615\r\n'
                 b'Server: SSTP-Server/%s\r\n\r\n' % str(__version__).encode())
@@ -631,9 +637,14 @@ class SSTPProtocolFactory:
         self.use_http_proxy = (config.no_ssl and not config.proxy_protocol)
         self.remote_pool = remote_pool
         self.cert_hash = cert_hash
+        self.logging = logging.getLogger('SSTP')
 
     def __call__(self):
-        proto = self.protocol()
+        proto = self.protocol(self.logging)
         proto.factory = self
         return proto
+
+class SSTPLogging(logging.LoggerAdapter):
+    def process(self, msg, kwargs):
+        return '[%s/%s] %s' % (self.extra['id'], self.extra['host'], msg), kwargs
 
