@@ -57,6 +57,7 @@ class SSTPProtocol(Protocol):
         self.proxy_protocol_passed = False
         self.correlation_id = None
         self.remote_host = None
+        self.remote_port = None
         # PPP SSTP API
         self.ppp_sstp = None
         # High(er) LAyer Key (HLAK)
@@ -75,8 +76,10 @@ class SSTPProtocol(Protocol):
         peer = self.transport.get_extra_info("peername")
         if hasattr(peer, 'host'):
             self.remote_host = str(peer.host)
+            self.remote_port = int(peer.port) if hasattr(peer, 'port') else None
         elif type(peer) == tuple:
             self.remote_host = peer[0]
+            self.remote_port = peer[1]
 
 
     def data_received(self, data):
