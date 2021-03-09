@@ -66,8 +66,11 @@ class SSTPProtocol(Protocol):
         self.client_cmac = None
 
     def init_logging(self):
-        self.logging = SSTPLogging(self.logging,
-                {'host': self.remote_host, 'id': self.correlation_id })
+        self.logging = SSTPLogging(self.logging, {
+            'id': self.correlation_id,
+            'host': self.remote_host,
+            'port': self.remote_port,
+        })
 
 
     def connection_made(self, transport):
@@ -658,5 +661,12 @@ class SSTPProtocolFactory:
 
 class SSTPLogging(logging.LoggerAdapter):
     def process(self, msg, kwargs):
-        return '[%s/%s] %s' % (self.extra['id'], self.extra['host'], msg), kwargs
+        if self.extra['host'] is None:
+            return '[%s] %s' % (self.extra['id'], msg), kwargs
+        elif self.extra['port'] is None:
+            return '[%s/%s] %s' % (self.extra['id'],
+                    self.extra['host'], msg), kwargs
+        else:
+            return '[%s/%s:%d] %s' % (self.extra['id'],
+                    self.extra['host'], self.extra['port'], msg), kwargs
 
