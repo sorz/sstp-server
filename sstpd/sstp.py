@@ -154,14 +154,23 @@ class SSTPProtocol(Protocol):
                 self.correlation_id = guid.strip().strip("{}")
             except:
                 pass
+        host, port = None, None
         for header in filter(lambda x: b'x-forwarded-for' in x.lower(), headers):
             try:
                 hosts = header.decode('ascii').split(':')[1]
-                host = hosts.split(',')[0]
-                if self.factory.use_http_proxy:
-                    self.remote_host = host.strip()
+                host = hosts.split(',')[0].strip()
             except:
                 pass
+        for header in filter(lambda x: b'x-forwarded-sourceport' in x.lower(), headers):
+            try:
+                ports = header.decode('ascii').split(':')[1]
+                port = int(ports.split(',')[0].strip())
+            except:
+                pass
+        if self.factory.use_http_proxy and host is not None:
+            self.remote_host = host
+            # port can be None if not forwarded
+            self.remote_port = port
         self.init_logging()
         self.transport.write(b'HTTP/1.1 200 OK\r\n'
                 b'Content-Length: 18446744073709551615\r\n'
