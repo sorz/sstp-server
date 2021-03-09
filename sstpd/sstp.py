@@ -349,8 +349,16 @@ class SSTPProtocol(Protocol):
         if self.remote_host is not None:
             args += ['remotenumber', self.remote_host]
 
+        ppp_env = os.environ.copy()
+        if self.correlation_id is not None:
+            ppp_env['SSTP_REMOTE_ID'] = self.correlation_id
+        if self.remote_host is not None:
+            ppp_env['SSTP_REMOTE_HOST'] = self.remote_host
+        if self.remote_port is not None:
+            ppp_env['SSTP_REMOTE_PORT'] = str(self.remote_port)
+
         factory = PPPDProtocolFactory(callback=self, remote=remote)
-        coro = self.loop.subprocess_exec(factory, self.factory.pppd, *args)
+        coro = self.loop.subprocess_exec(factory, self.factory.pppd, *args, env=ppp_env)
         task = asyncio.ensure_future(coro)
         task.add_done_callback(self.pppd_started)
         self.state = State.SERVER_CALL_CONNECTED_PENDING
