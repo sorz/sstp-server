@@ -43,7 +43,8 @@ class State(Enum):
 
 class SSTPProtocol(Protocol):
 
-    def __init__(self):
+    def __init__(self, logging):
+        self.logging = logging
         self.loop = asyncio.get_event_loop()
         self.state = State.SERVER_CALL_DISCONNECTED
         self.sstp_packet_len = 0
@@ -54,13 +55,22 @@ class SSTPProtocol(Protocol):
         self.hello_timer = None
         self.reset_hello_timer()
         self.proxy_protocol_passed = False
+        self.correlation_id = None
         self.remote_host = None
+        self.remote_port = None
         # PPP SSTP API
         self.ppp_sstp = None
         # High(er) LAyer Key (HLAK)
         self.hlak = None
         # Client Compound MAC
         self.client_cmac = None
+
+    def init_logging(self):
+        self.logging = SSTPLogging(self.logging, {
+            'id': self.correlation_id,
+            'host': self.remote_host,
+            'port': self.remote_port,
+        })
 
 
     def connection_made(self, transport):
@@ -69,8 +79,10 @@ class SSTPProtocol(Protocol):
         peer = self.transport.get_extra_info("peername")
         if hasattr(peer, 'host'):
             self.remote_host = str(peer.host)
+            self.remote_port = int(peer.port) if hasattr(peer, 'port') else None
         elif type(peer) == tuple:
             self.remote_host = peer[0]
+            self.remote_port = peer[1]
 
 
     def data_received(self, data):
@@ -84,19 +96,19 @@ class SSTPProtocol(Protocol):
 
 
     def connection_lost(self, reason):
-        logging.info('Connection finished.')
+        self.logging.info('Connection finished.')
         if self.pppd is not None and self.pppd.transport is not None:
             try:
                 self.pppd.transport.terminate()
             except ProcessLookupError:
-                logging.warning('PPP process is gone already')
+                self.logging.warning('PPP process is gone already')
                 pass
             except Exception as e:
-                logging.warning('Unexpected exception %s', str(e))
+                self.logging.warning('Unexpected exception %s', str(e))
                 pass
             if self.factory.remote_pool is not None:
                 self.factory.remote_pool.unregister(self.pppd.remote)
-                logging.info('Unregistered address %s', self.pppd.remote);
+                self.logging.info('Unregistered address %s', self.pppd.remote);
         self.hello_timer.cancel()
         self.ppp_sstp_api_close()
 
@@ -108,10 +120,10 @@ class SSTPProtocol(Protocol):
         except PPNoEnoughData:
             pass
         except PPException as e:
-            logging.warning('PROXY PROTOCOL parsing error: %s', str(e))
+            self.logging.warning('PROXY PROTOCOL parsing error: %s', str(e))
             self.transport.close()
         else:
-            logging.debug('PROXY PROTOCOL header parsed: src %s, dest %s', src, dest)
+            self.logging.debug('PROXY PROTOCOL header parsed: src %s, dest %s', src, dest)
             self.remote_host = src[0]
             self.proxy_protocol_passed = True
             if self.receive_buf:
@@ -139,14 +151,30 @@ class SSTPProtocol(Protocol):
             return close('Unexpected HTTP method (%s) and/or version (%s).',
                          method.decode(errors='replace'),
                          version.decode(errors='replace'))
+        for header in filter(lambda x: b'sstpcorrelationid:' in x.lower(), headers):
+            try:
+                guid = header.decode('ascii').split(':')[1]
+                self.correlation_id = guid.strip().strip("{}")
+            except:
+                pass
+        host, port = None, None
         for header in filter(lambda x: b'x-forwarded-for' in x.lower(), headers):
             try:
                 hosts = header.decode('ascii').split(':')[1]
-                host = hosts.split(',')[0]
-                if self.factory.use_http_proxy:
-                    self.remote_host = host.strip()
+                host = hosts.split(',')[0].strip()
             except:
                 pass
+        for header in filter(lambda x: b'x-forwarded-sourceport' in x.lower(), headers):
+            try:
+                ports = header.decode('ascii').split(':')[1]
+                port = int(ports.split(',')[0].strip())
+            except:
+                pass
+        if self.factory.use_http_proxy and host is not None:
+            self.remote_host = host
+            # port can be None if not forwarded
+            self.remote_port = port
+        self.init_logging()
         self.transport.write(b'HTTP/1.1 200 OK\r\n'
                 b'Content-Length: 18446744073709551615\r\n'
                 b'Server: SSTP-Server/%s\r\n\r\n' % str(__version__).encode())
@@ -159,7 +187,7 @@ class SSTPProtocol(Protocol):
         while len(self.receive_buf) >= 4:
             # Check version.
             if self.receive_buf[0] != 0x10:
-                logging.warn('Unsupported SSTP version.')
+                self.logging.warn('Unsupported SSTP version.')
                 self.transport.close()
                 return
             # Get length if necessary.
@@ -193,8 +221,8 @@ class SSTPProtocol(Protocol):
 
     def sstp_data_packet_received(self, data):
         if __debug__:
-            logging.debug('sstp => pppd (%s bytes).', len(data))
-            logging.log(VERBOSE, hexdump(data))
+            self.logging.debug('sstp => pppd (%s bytes).', len(data))
+            self.logging.log(VERBOSE, hexdump(data))
         if self.pppd is None:
             print('pppd is None.')
             return
@@ -202,7 +230,7 @@ class SSTPProtocol(Protocol):
 
 
     def sstp_control_packet_received(self, msg_type, attributes):
-        logging.info('SSTP control packet (%s) received.',
+        self.logging.info('SSTP control packet (%s) received.',
                      MsgType.str.get(msg_type, msg_type))
         if msg_type == MsgType.CALL_CONNECT_REQUEST:
             protocolId = attributes[0][1]
@@ -214,14 +242,14 @@ class SSTPProtocol(Protocol):
                 None
             )
             if attr_obj is None:
-                logging.warn('Crypto Binding Attribute '
+                self.logging.warn('Crypto Binding Attribute '
                         'expected in Call Connect')
                 self.abort(ATTRIB_STATUS_INVALID_FRAME_RECEIVED)
                 return
             attr = attr_obj[1]
             if len(attr) != 0x64:
                 # MS-SSTP : 2.2.7 Crypto Binding Attribute
-                logging.warn('Crypto Binding Attribute length '
+                self.logging.warn('Crypto Binding Attribute length '
                         'MUST be 104 (0x068)')
                 self.abort(ATTRIB_STATUS_INVALID_FRAME_RECEIVED)
                 return
@@ -235,7 +263,7 @@ class SSTPProtocol(Protocol):
                 cert_hash = attr[36:68]
                 mac_hash = attr[68:100]
             else:
-                logging.warn('Unsupported hash protocol in Crypto '
+                self.logging.warn('Unsupported hash protocol in Crypto '
                     'Binding Attribute.')
                 self.abort(ATTRIB_STATUS_INVALID_FRAME_RECEIVED)
                 return
@@ -258,7 +286,7 @@ class SSTPProtocol(Protocol):
         elif msg_type == MsgType.ECHO_RESPONSE:
             self.sstp_msg_echo_response()
         else:
-            logging.warn('Unknown type of SSTP control packet.')
+            self.logging.warn('Unknown type of SSTP control packet.')
             self.abort(ATTRIB_STATUS_INVALID_FRAME_RECEIVED)
 
 
@@ -269,11 +297,11 @@ class SSTPProtocol(Protocol):
                 State.CALL_DISCONNECT_TIMEOUT_PENDING):
             return
         if self.state != State.SERVER_CONNECT_REQUEST_PENDING:
-            logging.warn('Not in the state.')
+            self.logging.warn('Not in the state.')
             self.transport.close()
             return
         if protocolId != SSTP_ENCAPSULATED_PROTOCOL_PPP:
-            logging.warn('Unsupported encapsulated protocol.')
+            self.logging.warn('Unsupported encapsulated protocol.')
             nak = SSTPControlPacket(MsgType.CALL_CONNECT_NAK)
             nak.attributes = [(SSTP_ATTRIB_ENCAPSULATED_PROTOCOL_ID,
                     ATTRIB_STATUS_VALUE_NOT_SUPPORTED)]
@@ -296,11 +324,11 @@ class SSTPProtocol(Protocol):
         if self.factory.remote_pool:
             remote = self.factory.remote_pool.apply()
             if remote is None:
-                logging.warn('IP address pool is full. '
+                self.logging.warn('IP address pool is full. '
                              'Cannot accept new connection.')
                 self.abort()
                 return
-            logging.info('Registered address %s', remote);
+            self.logging.info('Registered address %s', remote);
 
         address_argument = '%s:%s' % (self.factory.local, remote)
         args = ['notty', 'file', self.factory.pppd_config_file,
@@ -321,8 +349,16 @@ class SSTPProtocol(Protocol):
         if self.remote_host is not None:
             args += ['remotenumber', self.remote_host]
 
+        ppp_env = os.environ.copy()
+        if self.correlation_id is not None:
+            ppp_env['SSTP_REMOTE_ID'] = self.correlation_id
+        if self.remote_host is not None:
+            ppp_env['SSTP_REMOTE_HOST'] = self.remote_host
+        if self.remote_port is not None:
+            ppp_env['SSTP_REMOTE_PORT'] = str(self.remote_port)
+
         factory = PPPDProtocolFactory(callback=self, remote=remote)
-        coro = self.loop.subprocess_exec(factory, self.factory.pppd, *args)
+        coro = self.loop.subprocess_exec(factory, self.factory.pppd, *args, env=ppp_env)
         task = asyncio.ensure_future(coro)
         task.add_done_callback(self.pppd_started)
         self.state = State.SERVER_CALL_CONNECTED_PENDING
@@ -330,7 +366,7 @@ class SSTPProtocol(Protocol):
     def pppd_started(self, task):
         err = task.exception()
         if err is not None:
-            logging.warning("Fail to start pppd: %s", err)
+            self.logging.warning("Fail to start pppd: %s", err)
             self.abort()
             return
         transport, protocol = task.result()
@@ -340,7 +376,7 @@ class SSTPProtocol(Protocol):
     def ppp_sstp_api(self, task):
         err = task.exception()
         if err is not None:
-            logging.warning("Fail to start PPP SSTP API: %s", err)
+            self.logging.warning("Fail to start PPP SSTP API: %s", err)
             self.abort()
             return
         server = task.result()
@@ -350,12 +386,12 @@ class SSTPProtocol(Protocol):
         if self.ppp_sstp is not None:
             socks = list(map(lambda s: s.getsockname(), self.ppp_sstp.sockets))
 
-            logging.debug("Close PPP SSTP API.")
+            self.logging.debug("Close PPP SSTP API.")
             self.ppp_sstp.close()
 
             for sock in socks:
                 try:
-                    logging.debug("Remove SSTP API sock %s", sock)
+                    self.logging.debug("Remove SSTP API sock %s", sock)
                     os.remove(sock)
                 except:
                     pass
@@ -372,31 +408,31 @@ class SSTPProtocol(Protocol):
             self.abort(ATTRIB_STATUS_UNACCEPTED_FRAME_RECEIVED)
             return
 
-        logging.debug("Received certificate %s hash: %s",
+        self.logging.debug("Received certificate %s hash: %s",
                 ("SHA1", "SHA256")[hash_type == CERT_HASH_PROTOCOL_SHA256],
                 hexlify(cert_hash).decode())
-        logging.debug("Received MAC hash: %s", hexlify(mac_hash).decode())
+        self.logging.debug("Received MAC hash: %s", hexlify(mac_hash).decode())
 
         if nonce != self.nonce:
-            logging.error('Received wrong nonce.')
+            self.logging.error('Received wrong nonce.')
             self.abort(ATTRIB_STATUS_INVALID_FRAME_RECEIVED)
             return
 
         if self.factory.cert_hash is not None \
                 and cert_hash not in self.factory.cert_hash:
-            logging.error("Certificate hash mismatch between server's "
+            self.logging.error("Certificate hash mismatch between server's "
                             "and client's. Reject this connection.")
             self.abort(ATTRIB_STATUS_INVALID_FRAME_RECEIVED)
             return
 
         if not self.should_verify_crypto_binding():
-            logging.debug("No crypto binding needed.")
+            self.logging.debug("No crypto binding needed.")
             self.state = State.SERVER_CALL_CONNECTED
-            logging.info('Connection established.')
+            self.logging.info('Connection established.')
             return
 
         if self.hlak is None:
-            logging.warning("Waiting for the Higher Layer Authentication "
+            self.logging.warning("Waiting for the Higher Layer Authentication "
                     "Key (HLAK) to verify Crypto Binding.")
             self.client_cmac = mac_hash
             return
@@ -406,7 +442,7 @@ class SSTPProtocol(Protocol):
 
     def sstp_call_connected_crypto_binding(self, mac_hash):
         if self.hlak is None:
-            logging.error("Failed to verify Crypto Binding, as the "
+            self.logging.error("Failed to verify Crypto Binding, as the "
                     "Higher Layer Authentication Key is missing.")
             self.abort(ATTRIB_STATUS_INVALID_FRAME_RECEIVED)
             return
@@ -431,7 +467,7 @@ class SSTPProtocol(Protocol):
 
         cmk = t1.digest()
         if __debug__:
-            logging.debug("Crypto Binding CMK %s", t1.hexdigest())
+            self.logging.debug("Crypto Binding CMK %s", t1.hexdigest())
 
         # reconstruct Call Connect message with zeroed CMAC field
         cc_msg = bytes((0x10, 0x01, 0x00, 0x70))
@@ -452,23 +488,23 @@ class SSTPProtocol(Protocol):
         cmac.update(cc_msg)
 
         if __debug__:
-            logging.debug("Crypto Binding CMAC %s", cmac.hexdigest())
+            self.logging.debug("Crypto Binding CMAC %s", cmac.hexdigest())
 
         if not hmac.compare_digest(cmac.digest(), mac_hash):
-            logging.error("Crypto Binding is invalid.")
+            self.logging.error("Crypto Binding is invalid.")
             self.abort(ATTRIB_STATUS_INVALID_FRAME_RECEIVED)
             return
 
-        logging.info("Crypto Binding is valid.")
+        self.logging.info("Crypto Binding is valid.")
         self.state = State.SERVER_CALL_CONNECTED
-        logging.info('Connection established.')
+        self.logging.info('Connection established.')
 
 
     def sstp_msg_call_abort(self, status=None):
         if self.state in (State.CALL_ABORT_TIMEOUT_PENDING,
                 State.CALL_DISCONNECT_TIMEOUT_PENDING):
             return
-        logging.warn("Call abort.")
+        self.logging.warn("Call abort.")
         if self.state == State.CALL_ABORT_PENDING:
             self.loop.call_later(1, self.transport.close)
             return
@@ -484,7 +520,7 @@ class SSTPProtocol(Protocol):
                 State.CALL_ABORT_PENDING,
                 State.CALL_DISCONNECT_TIMEOUT_PENDING):
             return
-        logging.info('Received call disconnect request.')
+        self.logging.info('Received call disconnect request.')
         self.state = State.CALL_DISCONNECT_IN_PROGRESS_2
         ack = SSTPControlPacket(MsgType.CALL_DISCONNECT_ACK)
         ack.write_to(self.transport.write)
@@ -530,10 +566,10 @@ class SSTPProtocol(Protocol):
         if self.state == State.SERVER_CALL_DISCONNECTED:
             self.transport.close()  # TODO: follow HTTP
         elif close:
-            logging.warn('Ping time out.')
+            self.logging.warn('Ping time out.')
             self.abort(ATTRIB_STATUS_NEGOTIATION_TIMEOUT)
         else:
-            logging.info('Send echo request.')
+            self.logging.info('Send echo request.')
             echo = SSTPControlPacket(MsgType.ECHO_REQUEST)
             echo.write_to(self.transport.write)
             self.reset_hello_timer(True)
@@ -552,9 +588,9 @@ class SSTPProtocol(Protocol):
 
     def abort(self, status=None):
         if status is None:
-            logging.warn('Abort.')
+            self.logging.warn('Abort.')
         else:
-            logging.warn('Abort (%s).', status)
+            self.logging.warn('Abort (%s).', status)
         self.state = State.CALL_DISCONNECT_IN_PROGRESS_1
         msg = SSTPControlPacket(MsgType.CALL_ABORT)
         if status is not None:
@@ -570,8 +606,8 @@ class SSTPProtocol(Protocol):
             return
         for frame in frames:
             if __debug__:
-                logging.debug('pppd => sstp (%d bytes)', len(frame))
-                logging.log(VERBOSE, hexdump(frame))
+                self.logging.debug('pppd => sstp (%d bytes)', len(frame))
+                self.logging.log(VERBOSE, hexdump(frame))
             SSTPDataPacket(frame).write_to(self.transport.write)
 
     def ppp_stopped(self):
@@ -595,8 +631,8 @@ class SSTPProtocol(Protocol):
             hlak += bytes(32 - len(hlak))
         self.hlak = hlak[0:32]
 
-        logging.info("Received Higher Layer Authentication Key.")
-        logging.debug("Configured HLAK as %s", self.hlak.hex())
+        self.logging.info("Received Higher Layer Authentication Key.")
+        self.logging.debug("Configured HLAK as %s", self.hlak.hex())
 
         self.ppp_sstp_api_close()
 
@@ -624,9 +660,21 @@ class SSTPProtocolFactory:
         self.use_http_proxy = (config.no_ssl and not config.proxy_protocol)
         self.remote_pool = remote_pool
         self.cert_hash = cert_hash
+        self.logging = logging.getLogger('SSTP')
 
     def __call__(self):
-        proto = self.protocol()
+        proto = self.protocol(self.logging)
         proto.factory = self
         return proto
+
+class SSTPLogging(logging.LoggerAdapter):
+    def process(self, msg, kwargs):
+        if self.extra['host'] is None:
+            return '[%s] %s' % (self.extra['id'], msg), kwargs
+        elif self.extra['port'] is None:
+            return '[%s/%s] %s' % (self.extra['id'],
+                    self.extra['host'], msg), kwargs
+        else:
+            return '[%s/%s:%d] %s' % (self.extra['id'],
+                    self.extra['host'], self.extra['port'], msg), kwargs
 
