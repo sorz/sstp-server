@@ -408,10 +408,10 @@ class SSTPProtocol(Protocol):
             self.abort(ATTRIB_STATUS_UNACCEPTED_FRAME_RECEIVED)
             return
 
-        self.logging.debug("Received certificate %s hash: %s",
+        self.logging.debug("Received Cert %s: %s",
                 ("SHA1", "SHA256")[hash_type == CERT_HASH_PROTOCOL_SHA256],
                 hexlify(cert_hash).decode())
-        self.logging.debug("Received MAC hash: %s", hexlify(mac_hash).decode())
+        self.logging.debug("Received CMAC: %s", hexlify(mac_hash).decode())
 
         if nonce != self.nonce:
             self.logging.error('Received wrong nonce.')
