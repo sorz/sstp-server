@@ -408,10 +408,10 @@ class SSTPProtocol(Protocol):
             self.abort(ATTRIB_STATUS_UNACCEPTED_FRAME_RECEIVED)
             return
 
-        self.logging.debug("Received certificate %s hash: %s",
+        self.logging.debug("Received Cert %s: %s",
                 ("SHA1", "SHA256")[hash_type == CERT_HASH_PROTOCOL_SHA256],
                 hexlify(cert_hash).decode())
-        self.logging.debug("Received MAC hash: %s", hexlify(mac_hash).decode())
+        self.logging.debug("Received CMAC: %s", hexlify(mac_hash).decode())
 
         if nonce != self.nonce:
             self.logging.error('Received wrong nonce.')
@@ -450,25 +450,6 @@ class SSTPProtocol(Protocol):
         hash_type = (CERT_HASH_PROTOCOL_SHA1,
                 CERT_HASH_PROTOCOL_SHA256)[len(mac_hash) == 32]
 
-        # Compound MAC Key (CMK) seed
-        cmk_seed = b'SSTP inner method derived CMK'
-        cmk_digest = (hashlib.sha1, hashlib.sha256)\
-                [hash_type == CERT_HASH_PROTOCOL_SHA256]
-
-        # T1 = HMAC(HLAK, S | LEN | 0x01)
-        t1 = hmac.new(self.hlak, digestmod=cmk_digest)
-
-        # CMK len (length of digest) - 16-bits little endian
-        cmk_len = bytes((t1.digest_size, 0))
-
-        t1.update(cmk_seed)
-        t1.update(cmk_len)
-        t1.update(b'\x01')
-
-        cmk = t1.digest()
-        if __debug__:
-            self.logging.debug("Crypto Binding CMK %s", t1.hexdigest())
-
         # reconstruct Call Connect message with zeroed CMAC field
         cc_msg = bytes((0x10, 0x01, 0x00, 0x70))
         cc_msg += MsgType.CALL_CONNECTED
@@ -483,12 +464,37 @@ class SSTPProtocol(Protocol):
         # [padding + ] zeroed cmac [+ padding]
         cc_msg += bytes(0x70 - len(cc_msg))
 
-        # CMAC = HMAC(CMK, CC_MSG)
-        cmac = hmac.new(cmk, digestmod=cmk_digest)
-        cmac.update(cc_msg)
+        # Compound MAC Key (CMK) seed
+        cmk_seed = b'SSTP inner method derived CMK'
+        cmk_digest = (hashlib.sha1, hashlib.sha256)\
+                [hash_type == CERT_HASH_PROTOCOL_SHA256]
+
+        # [MS-SSTP] 3.2.5.{2,4} - If the higher-layer PPP authentication method
+        # did not generate any keys, or if PPP authentication is bypassed, then
+        # the HLAK MUST be 32 octets of 0x00
+        for hlak in {self.hlak, bytes(32)}:
+            # T1 = HMAC(HLAK, S | LEN | 0x01)
+            t1 = hmac.new(hlak, digestmod=cmk_digest)
+
+            # CMK len (length of digest) - 16-bits little endian
+            cmk_len = bytes((t1.digest_size, 0))
+
+            t1.update(cmk_seed)
+            t1.update(cmk_len)
+            t1.update(b'\x01')
+
+            cmk = t1.digest()
+
+            # CMAC = HMAC(CMK, CC_MSG)
+            cmac = hmac.new(cmk, digestmod=cmk_digest)
+            cmac.update(cc_msg)
+
+            if hmac.compare_digest(cmac.digest(), mac_hash):
+                break
 
         if __debug__:
-            self.logging.debug("Crypto Binding CMAC %s", cmac.hexdigest())
+            self.logging.debug("Crypto Binding CMK: %s", t1.hexdigest())
+            self.logging.debug("Crypto Binding CMAC: %s", cmac.hexdigest())
 
         if not hmac.compare_digest(cmac.digest(), mac_hash):
             self.logging.error("Crypto Binding is invalid.")
