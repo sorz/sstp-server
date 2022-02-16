@@ -654,19 +654,23 @@ class SSTPProtocolFactory:
     def __init__(self, config, remote_pool, cert_hash=None):
         self.pppd = config.pppd
         self.pppd_config_file = config.pppd_config
-        # detect ppp_sstp_api_plugin
-        ppp_sstp_api_plugin = 'sstp-pppd-plugin.so'
-        has_plugin = subprocess.run(
-                [self.pppd, 'plugin', ppp_sstp_api_plugin, 'notty', 'dryrun'],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        self.pppd_sstp_api_plugin = (None, ppp_sstp_api_plugin)\
-                [has_plugin.returncode == 0]
         self.local = config.local
         self.proxy_protocol = config.proxy_protocol
         self.use_http_proxy = (config.no_ssl and not config.proxy_protocol)
         self.remote_pool = remote_pool
         self.cert_hash = cert_hash
         self.logging = logging.getLogger('SSTP')
+        # detect ppp_sstp_api_plugin
+        ppp_sstp_api_plugin = 'sstp-pppd-plugin.so'
+        has_plugin = subprocess.run(
+                [self.pppd, 'plugin', ppp_sstp_api_plugin, 'notty', 'dryrun'],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if has_plugin.returncode == 0:
+            self.pppd_sstp_api_plugin = ppp_sstp_api_plugin
+            self.logging.info("Found and using SSTP-API plugin")
+        else:
+            self.pppd_sstp_api_plugin = None
+            self.logging.info("Did not find SSTP-API plugin")
 
     def __call__(self):
         proto = self.protocol(self.logging)
