@@ -1,5 +1,5 @@
 import os
-from struct import pack
+import struct
 import asyncio
 from binascii import hexlify
 
@@ -175,38 +175,43 @@ class PPPDSSTPAPIProtocol(asyncio.Protocol):
                         hexlify(self.master_recv_key))
 
     def message_parse(self, message):
+        attribute_header_format = 'HH'
+        attribute_header_length = struct.calcsize(attribute_header_format)
         idx = 0
         while idx < len(message):
-            if (idx + 4 > len(message)):
+            if (idx + attribute_header_length > len(message)):
                 break
-            atype = (message[idx+1] << 8) | message[idx]
-            alen = (message[idx+3] << 8) | message[idx+2]
+            (atype, alen) = struct.unpack_from(attribute_header_format, message, idx)
             self.sstp.logging.debug("SSTP API message - attribute %s (len: %d)",
                     self.attribute_type(atype), alen)
-            idx += 4
+            idx += attribute_header_length
             self.handle_attribute(atype, message[idx:idx + alen])
-            idx += alen
+            idx += (alen + 3) & 0xfffffffc
 
         return (idx == len(message))
 
     def data_received(self, message):
-        # magic 'sstp' as 32-bits integer in network order
-        magic = b'\x70\x74\x73\x73'
-        # ack whatever received and close connection
-        ack = magic + b'\x00\x00' + b'\x03\x00'
+        packet_header_format = 'IHH'
+        packet_header_length = struct.calcsize(packet_header_format)
+        # magic value is ASCII encoding for string 'sstp'
+        magic = 0x73737470
+        # magic, len = 0, type = SSTP_API_MSG_ACK
+        ack = struct.pack(packet_header_format, magic, 0, self.SSTP_API_MSG_ACK)
         self.transport.write(ack)
         self.close()
-        if message[0:4] != magic:
-            self.sstp.logging.error("SSTP API message - invalid magic %a.", message[0:4])
+        if len(message) < packet_header_length:
+            self.sstp.logging.error("SSTP API message - incorrect header length.")
             return
-        length = (message[5] << 8) | message[4]
-        if length + 8 != len(message):
-            self.sstp.logging.error("SSTP API message - incorrect length.")
+        (msg_magic, length, mtype) = struct.unpack_from(packet_header_format, message)
+        if msg_magic != magic:
+            self.sstp.logging.error("SSTP API message - invalid magic %#010x .", msg_magic)
             return
-        if not self.message_parse(message[8:]) :
+        if length + packet_header_length != len(message):
+            self.sstp.logging.error("SSTP API message - incorrect packet length.")
+            return
+        if not self.message_parse(message[packet_header_length:]) :
             self.sstp.logging.error("SSTP API message - failed parsing attributes.")
             return
-        mtype = (message[7] << 8) | message[6]
         if self.is_auth_message(mtype):
             if (self.master_send_key is None or
                     self.master_recv_key is None):
