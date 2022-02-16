@@ -64,6 +64,7 @@ class SSTPProtocol(Protocol):
         self.hlak = None
         # Client Compound MAC
         self.client_cmac = None
+        self.transport = None
 
     def init_logging(self):
         self.logging = SSTPLogging(self.logging, {
@@ -570,7 +571,10 @@ class SSTPProtocol(Protocol):
 
     def hello_timer_expired(self, close):
         if self.state == State.SERVER_CALL_DISCONNECTED:
-            self.transport.close()  # TODO: follow HTTP
+            if self.transport is not None:
+                self.transport.close()  # TODO: follow HTTP
+            else:
+                self.logging.warn('Rump connection.')
         elif close:
             self.logging.warn('Ping time out.')
             self.abort(ATTRIB_STATUS_NEGOTIATION_TIMEOUT)
