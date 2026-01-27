@@ -10,6 +10,8 @@ IP1_EN = (b'\x7e\x80\x21\x7d\x22\x7d\x22\x7d\x20\x7d\x2a\x7d\x23\x7d\x26\x7d'
           b'\x2a\x7d\x2a\x20\x7d\x21\x6d\xf9\x7e')
 
 def main():
+    if 'file' not in sys.argv:
+        sys.exit(1)
     #setcbreak(stdin, TCSANOW)
     stdin = sys.stdin.buffer
     stdout = sys.stdout.buffer

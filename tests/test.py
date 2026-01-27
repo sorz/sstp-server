@@ -5,19 +5,22 @@ import time
 import ssl
 
 
-CERT = 'tests/self-signed.pem'
-ARGS = ['sstpd', '-c', CERT, '-p', '4433', '-v', '5',
-        '--pppd', 'tests/pppd.py']
+from sstpd.certtool import get_fingerprint
 
-CERT_HASH = (b'\x9f\xf0\xa8\x8c\xa0\x9c\x00\x6e\x0f\xb0\x22\x2e\xfa\xb6\x5f'
-             b'\x4c\xf3\xf5\xb2\x15\xfb\xd2\x6b\x83\x26\x72\x6d\xc6\x88\x12'
-             b'\x61\x15')
+CERT = 'tests/self-signed.pem'
+ARGS = ['sstpd', '-c', CERT, '-l', '127.0.0.1', '-p', '4433', '-v', '5',
+        '--pppd', 'tests/mock_pppd.py']
+
+CERT_HASH = get_fingerprint(CERT).sha256
 LCP1_DE = (b'\xff\x03\xc0\x21\x04\x00\x00\x07\x0d\x03\x06')
 IP1_DE = (b'\x80\x21\x02\x02\x00\x0a\x03\x06\x0a\x0a\x20\x01')
 
+
 def _ssl_connect():
     conn = socket.create_connection(('127.0.0.1', 4433))
-    conn = ssl.wrap_socket(conn, ca_certs=CERT)
+    ctx = ssl.create_default_context(cafile=CERT)
+    ctx.check_hostname = False
+    conn = ctx.wrap_socket(conn)
     return conn
 
 
@@ -112,11 +115,11 @@ def test_connect():
 
 def main():
     process = Popen(ARGS)
-    time.sleep(2)
+    time.sleep(0.2)
     try:
         test_connect()
     finally:
-        time.sleep(1)
+        time.sleep(0.2)
         process.terminate()
 
 
