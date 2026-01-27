@@ -149,7 +149,7 @@ def main():
     if uvloop is None:
         logging.info('Running without uvloop')
     else:
-        asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
+        uvloop.install()
         logging.info('Using uvloop')
     try:
         loop = asyncio.get_event_loop()

@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sstp-server"
+description = "Secure Socket Tunneling Protocol (SSTP) VPN server."
+authors = [
+    { name = "Shell Chen", email = "me@sorz.org" }
+]
+urls = { Repository = "https://github.com/sorz/sstp-server" }
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Internet",
+    "Topic :: Internet :: Proxy Servers",
+    "License :: OSI Approved :: MIT License",
+]
+requires-python = ">=3.10"
+dependencies = []
+dynamic = ["version", "readme"]
+
+[project.optional-dependencies]
+uvloop = ["uvloop>=0.18.0"]
+
+[project.scripts]
+sstpd = "sstpd:run"
+
+[tool.setuptools.dynamic]
+version = {attr = "sstpd.__version__"}
+readme = {file = ["README.rst"]}
+
