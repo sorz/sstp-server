@@ -7,14 +7,18 @@ from sstpd.codec import escape, PppDecoder
 
 decoder = PppDecoder()
 
+
 def get_enscaped():
     frames = [os.urandom(1500) for i in range(2)]
-    return b''.join([escape(f) for f in frames])
+    return b"".join([escape(f) for f in frames])
+
 
 def prof_unescape():
-    return timeit.timeit('decoder.unescape(data)',
-                         setup='data = get_enscaped()',
-                         globals=globals())
+    return timeit.timeit(
+        "decoder.unescape(data)", setup="data = get_enscaped()", globals=globals()
+    )
+
+
 def codec_test():
     frame = os.urandom(1500)
     escaped = escape(frame)
@@ -24,10 +28,12 @@ def codec_test():
     print("unescaped: %d bytes" % len(unescaped[0]))
     assert unescaped[0] == frame
 
+
 def main():
     codec_test()
-    print('Test unescape...')
-    print('\t%f' % prof_unescape())
+    print("Test unescape...")
+    print("\t%f" % prof_unescape())
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

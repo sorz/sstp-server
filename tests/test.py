@@ -7,17 +7,28 @@ import ssl
 
 from sstpd.certtool import get_fingerprint
 
-CERT = 'tests/self-signed.pem'
-ARGS = ['sstpd', '-c', CERT, '-l', '127.0.0.1', '-p', '4433', '-v', '5',
-        '--pppd', 'tests/mock_pppd.py']
+CERT = "tests/self-signed.pem"
+ARGS = [
+    "sstpd",
+    "-c",
+    CERT,
+    "-l",
+    "127.0.0.1",
+    "-p",
+    "4433",
+    "-v",
+    "5",
+    "--pppd",
+    "tests/mock_pppd.py",
+]
 
 CERT_HASH = get_fingerprint(CERT).sha256
-LCP1_DE = (b'\xff\x03\xc0\x21\x04\x00\x00\x07\x0d\x03\x06')
-IP1_DE = (b'\x80\x21\x02\x02\x00\x0a\x03\x06\x0a\x0a\x20\x01')
+LCP1_DE = b"\xff\x03\xc0\x21\x04\x00\x00\x07\x0d\x03\x06"
+IP1_DE = b"\x80\x21\x02\x02\x00\x0a\x03\x06\x0a\x0a\x20\x01"
 
 
 def _ssl_connect():
-    conn = socket.create_connection(('127.0.0.1', 4433))
+    conn = socket.create_connection(("127.0.0.1", 4433))
     ctx = ssl.create_default_context(cafile=CERT)
     ctx.check_hostname = False
     conn = ctx.wrap_socket(conn)
@@ -25,27 +36,29 @@ def _ssl_connect():
 
 
 def _http_handshake(conn):
-    conn.write(b"SSTP_DUPLEX_POST "
-               b"/sra_{BA195980-CD49-458b-9E23-C84EE0ADCD75}/ HTTP/1.1\r\n"
-               b"Content-Length: 18446744073709551615\r\n"
-               b"Host: 127.0.0.1\r\n"
-               b"SSTPCORRELATIONID: {3F2504E0-4F89-11D3-9A0C-0305E82C3301}\r\n"
-               b"\r\n")
+    conn.write(
+        b"SSTP_DUPLEX_POST "
+        b"/sra_{BA195980-CD49-458b-9E23-C84EE0ADCD75}/ HTTP/1.1\r\n"
+        b"Content-Length: 18446744073709551615\r\n"
+        b"Host: 127.0.0.1\r\n"
+        b"SSTPCORRELATIONID: {3F2504E0-4F89-11D3-9A0C-0305E82C3301}\r\n"
+        b"\r\n"
+    )
     resp = conn.recv(4096)
-    assert resp.startswith(b'HTTP/1.1 200 OK')
+    assert resp.startswith(b"HTTP/1.1 200 OK")
 
 
 def _sstp_handshake(conn):
     # SSTP_MSG_CALL_CONNECT_REQUEST
-    f = conn.makefile('rwb')
+    f = conn.makefile("rwb")
     conn.write(b"\x10\x01\x00\x0e\x00\x01\x00\x01\x00\x01\x00\x06\x00\x01")
     time.sleep(0.1)
 
     # SSTP_MSG_CALL_CONNECT_ACK
-    assert f.read(4) == b'\x10\x01\x00\x30'  # ver, C, len
-    assert f.read(4) == b'\x00\x02\x00\x01'  # type, num attr
-    assert f.read(4) == b'\x00\x04\x00\x28'  # attr 1
-    assert f.read(4) == b'\x00\x00\x00\x03'  # proto bitmask
+    assert f.read(4) == b"\x10\x01\x00\x30"  # ver, C, len
+    assert f.read(4) == b"\x00\x02\x00\x01"  # type, num attr
+    assert f.read(4) == b"\x00\x04\x00\x28"  # attr 1
+    assert f.read(4) == b"\x00\x00\x00\x03"  # proto bitmask
     nonce = f.read(32)
     assert len(nonce) == 32
     f.close()
@@ -53,48 +66,48 @@ def _sstp_handshake(conn):
 
 
 def _ppp_lcp_test(conn):
-    f = conn.makefile('rwb')
+    f = conn.makefile("rwb")
 
-    assert f.read(4) == b'\x10\x00\x00\x0f'
+    assert f.read(4) == b"\x10\x00\x00\x0f"
     assert f.read(len(LCP1_DE)) == LCP1_DE
-    assert f.read(4) == b'\x10\x00\x00\x0f'
+    assert f.read(4) == b"\x10\x00\x00\x0f"
     assert f.read(len(LCP1_DE)) == LCP1_DE
 
-    f.write(b'\x10\x00\x00\x0f')
+    f.write(b"\x10\x00\x00\x0f")
     f.write(LCP1_DE)
-    f.write(b'\x10\x00\x00\x0f')
+    f.write(b"\x10\x00\x00\x0f")
     f.write(LCP1_DE)
     f.flush()
 
     # Drop echos
-    #f.read((4 + len(LCP1_DE)) * 2)
+    # f.read((4 + len(LCP1_DE)) * 2)
 
     f.close()
 
 
 def _ppp_ip_test(conn):
-    f = conn.makefile('rwb')
-    assert f.read(4) == b'\x10\x00\x00\x10'
+    f = conn.makefile("rwb")
+    assert f.read(4) == b"\x10\x00\x00\x10"
     assert f.read(len(IP1_DE)) == IP1_DE
 
-    f.write(b'\x10\x00\x00\x10')
+    f.write(b"\x10\x00\x00\x10")
     f.write(IP1_DE)
     f.flush()
 
-    assert f.read(4) == b'\x10\x00\x00\x10'
+    assert f.read(4) == b"\x10\x00\x00\x10"
     assert f.read(len(IP1_DE)) == IP1_DE
 
 
 def _sstp_connected(conn, nonce):
-    f = conn.makefile('rwb')
+    f = conn.makefile("rwb")
 
     # SSTP_MSG_CALL_CONNECTED
-    f.write(b'\x10\x01\x00\x70\x00\x04')  # ver, C, len, type
-    f.write(b'\x00\x01\x00\x03\x00\x68')  # attr
-    f.write(b'\x00\x00\x00\x02')  # hash bitmap
+    f.write(b"\x10\x01\x00\x70\x00\x04")  # ver, C, len, type
+    f.write(b"\x00\x01\x00\x03\x00\x68")  # attr
+    f.write(b"\x00\x00\x00\x02")  # hash bitmap
     f.write(nonce)
     f.write(CERT_HASH)
-    f.write(b'\x00' * 32)  # MAC
+    f.write(b"\x00" * 32)  # MAC
     f.flush()
     f.close()
 
@@ -123,6 +136,5 @@ def main():
         process.terminate()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
-
