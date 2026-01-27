@@ -1,12 +1,4 @@
-class SimpleEnumMeta(type):
-    """Metaclass. Add a dict `str` to allow looking up class's attribute name
-    by its value. Ideal for debugging.
-    """
-
-    def __new__(meta, name, bases, attrs):
-        attrs["str"] = {v: k for k, v in attrs.items() if not k.startswith("_")}
-        return super(SimpleEnumMeta, meta).__new__(meta, name, bases, attrs)
-
+from enum import Enum
 
 # Log level
 VERBOSE = 5
@@ -15,7 +7,7 @@ VERBOSE = 5
 
 
 # Message Type
-class MsgType(metaclass=SimpleEnumMeta):
+class MsgType(Enum):
     CALL_CONNECT_REQUEST = b"\x00\x01"
     CALL_CONNECT_ACK = b"\x00\x02"
     CALL_CONNECT_NAK = b"\x00\x03"

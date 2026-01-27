@@ -1,24 +1,23 @@
-import sys
-import ssl
+import argparse
 import asyncio
 import logging
-import argparse
-from socket import IPPROTO_TCP, TCP_NODELAY
-from configparser import ConfigParser, NoSectionError
+import ssl
+import sys
 from binascii import hexlify
+from configparser import ConfigParser, NoSectionError
+from socket import IPPROTO_TCP, TCP_NODELAY
 
 try:
     import uvloop
 except ImportError:
     uvloop = None
 
-from . import __doc__
-from . import certtool
-from .sstp import SSTPProtocolFactory
+from . import __doc__, certtool
 from .address import IPPool
+from .sstp import SSTPProtocolFactory
 
 
-def _get_args():
+def _get_args() -> argparse.Namespace:
     conf_parser = argparse.ArgumentParser(add_help=False)
     conf_parser.add_argument(
         "-f", "--conf-file", help="Specify config file.", metavar="FILE"
@@ -32,7 +31,7 @@ def _get_args():
     )
 
     args, remaining_argv = conf_parser.parse_known_args()
-    defaults = {
+    defaults: dict[str, str | int] = {
         "listen": "",
         "listen_port": 443,
         "pppd": "/usr/sbin/pppd",
@@ -45,7 +44,7 @@ def _get_args():
         config.read(args.conf_file)
         try:
             defaults.update(dict(config.items(args.conf_section)))
-        except NoSectionError as e:
+        except NoSectionError:
             print(
                 "Error: section [%s] not found in config file." % args.conf_section,
                 file=sys.stderr,
@@ -127,7 +126,7 @@ def _get_args():
     return args
 
 
-def _load_cert(cert_path, key_path=None):
+def _load_cert(cert_path: str, key_path: str | None = None) -> ssl.SSLContext:
     if not cert_path:
         logging.error("argument -c/--pem-cert is required")
         sys.exit(2)
@@ -143,7 +142,7 @@ def _load_cert(cert_path, key_path=None):
     return context
 
 
-def main():
+def main() -> None:
     args = _get_args()
     logging.basicConfig(
         level=args.log_level, format="%(asctime)s %(levelname)-s: %(message)s"

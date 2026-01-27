@@ -27,7 +27,7 @@ LCP1_DE = b"\xff\x03\xc0\x21\x04\x00\x00\x07\x0d\x03\x06"
 IP1_DE = b"\x80\x21\x02\x02\x00\x0a\x03\x06\x0a\x0a\x20\x01"
 
 
-def _ssl_connect():
+def _ssl_connect() -> socket.socket:
     conn = socket.create_connection(("127.0.0.1", 4433))
     ctx = ssl.create_default_context(cafile=CERT)
     ctx.check_hostname = False
@@ -35,8 +35,8 @@ def _ssl_connect():
     return conn
 
 
-def _http_handshake(conn):
-    conn.write(
+def _http_handshake(conn: socket.socket) -> None:
+    conn.write(  # type: ignore
         b"SSTP_DUPLEX_POST "
         b"/sra_{BA195980-CD49-458b-9E23-C84EE0ADCD75}/ HTTP/1.1\r\n"
         b"Content-Length: 18446744073709551615\r\n"
@@ -48,10 +48,10 @@ def _http_handshake(conn):
     assert resp.startswith(b"HTTP/1.1 200 OK")
 
 
-def _sstp_handshake(conn):
+def _sstp_handshake(conn: socket.socket) -> bytes:
     # SSTP_MSG_CALL_CONNECT_REQUEST
     f = conn.makefile("rwb")
-    conn.write(b"\x10\x01\x00\x0e\x00\x01\x00\x01\x00\x01\x00\x06\x00\x01")
+    conn.write(b"\x10\x01\x00\x0e\x00\x01\x00\x01\x00\x01\x00\x06\x00\x01")  # type: ignore
     time.sleep(0.1)
 
     # SSTP_MSG_CALL_CONNECT_ACK
@@ -65,7 +65,7 @@ def _sstp_handshake(conn):
     return nonce
 
 
-def _ppp_lcp_test(conn):
+def _ppp_lcp_test(conn: socket.socket) -> None:
     f = conn.makefile("rwb")
 
     assert f.read(4) == b"\x10\x00\x00\x0f"
@@ -85,7 +85,7 @@ def _ppp_lcp_test(conn):
     f.close()
 
 
-def _ppp_ip_test(conn):
+def _ppp_ip_test(conn: socket.socket) -> None:
     f = conn.makefile("rwb")
     assert f.read(4) == b"\x10\x00\x00\x10"
     assert f.read(len(IP1_DE)) == IP1_DE
@@ -98,7 +98,7 @@ def _ppp_ip_test(conn):
     assert f.read(len(IP1_DE)) == IP1_DE
 
 
-def _sstp_connected(conn, nonce):
+def _sstp_connected(conn: socket.socket, nonce: bytes) -> None:
     f = conn.makefile("rwb")
 
     # SSTP_MSG_CALL_CONNECTED
@@ -112,7 +112,7 @@ def _sstp_connected(conn, nonce):
     f.close()
 
 
-def test_connect():
+def test_connect() -> None:
     conn = _ssl_connect()
     time.sleep(0.1)
     _http_handshake(conn)
@@ -126,7 +126,7 @@ def test_connect():
     _ppp_ip_test(conn)
 
 
-def main():
+def main() -> None:
     process = Popen(ARGS)
     time.sleep(0.2)
     try:

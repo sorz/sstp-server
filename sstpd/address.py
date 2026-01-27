@@ -1,10 +1,12 @@
 import ipaddress
+from collections.abc import Iterator
+from ipaddress import IPv4Address, IPv6Address
 
 
 class IPPool:
-    def __init__(self, network, range=None):
-        self._pool = []
-        self._capacity = None
+    def __init__(self, network: str, range: str | None = None) -> None:
+        self._pool: list[IPv4Address | IPv6Address] = []
+        self._capacity: int | None = None
         self._network = ipaddress.ip_network(network)
         self._first = self._network.network_address + 1
         self._last = self._network.broadcast_address - 1
@@ -26,24 +28,25 @@ class IPPool:
                         self._last = self._network.network_address + int(last)
         self.reset()
 
-    def _next_host(self):
+    def _next_host(self) -> IPv4Address | IPv6Address | None:
         for host in self._hosts:
             if host in self._pool:
                 continue
             return host
+        return None
 
-    def register(self, address):
+    def register(self, address: str | IPv4Address | IPv6Address) -> None:
         addr = ipaddress.ip_address(address)
         if addr in self._pool:
             raise RegisteredException()
         self._pool.append(addr)
 
-    def apply(self):
+    def apply(self) -> IPv4Address | IPv6Address | None:
         """Return a available IP address and register it.
         Return None if the pool is full.
         """
         if self._capacity is not None and len(self._pool) == self._capacity:
-            return
+            return None
         addr = self._next_host()
         if addr is None:
             self.reset()
@@ -55,16 +58,16 @@ class IPPool:
             self._pool.append(addr)
         return addr
 
-    def unregister(self, address):
+    def unregister(self, address: str | IPv4Address | IPv6Address) -> None:
         addr = ipaddress.ip_address(address)
         try:
             self._pool.remove(addr)
         except ValueError:
             pass
 
-    def reset(self):
-        self._hosts = filter(
-            lambda host: host >= self._first and host <= self._last,
+    def reset(self) -> None:
+        self._hosts: Iterator[IPv4Address | IPv6Address] = filter(
+            lambda host: host >= self._first and host <= self._last,  # type: ignore
             self._network.hosts(),
         )
 

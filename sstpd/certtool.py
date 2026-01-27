@@ -1,15 +1,18 @@
 import base64
 import hashlib
-from collections import namedtuple
+from typing import NamedTuple
 
 
 PEM_BEGIN_MARK = b"-----BEGIN CERTIFICATE-----"
 PEM_END_MARK = b"-----END CERTIFICATE-----"
 
-Fingerprint = namedtuple("Fingerprint", "sha1, sha256")
+
+class Fingerprint(NamedTuple):
+    sha1: bytes
+    sha256: bytes
 
 
-def get_fingerprint(pem_path):
+def get_fingerprint(pem_path: str) -> Fingerprint:
     """Return (sha1, sha256) fingerprint of PEM cert."""
     lines = []
     with open(pem_path, "rb") as pem:

@@ -1,19 +1,18 @@
-import os
-from struct import pack
 import asyncio
+import os
 from binascii import hexlify
+from typing import Any
 
+from .codec import PppDecoder, escape  # type: ignore
 from .constants import VERBOSE
-from .codec import escape, PppDecoder
 from .utils import hexdump
-
 
 STDIN = 0
 STDOUT = 1
 STDERR = 2
 
 
-def is_ppp_control_frame(frame):
+def is_ppp_control_frame(frame: bytes) -> bool:
     if frame.startswith(b"\xff\x03"):
         protocol = frame[2:4]
     else:
@@ -22,91 +21,104 @@ def is_ppp_control_frame(frame):
 
 
 class PPPDProtocol(asyncio.SubprocessProtocol):
-    def __init__(self):
+    def __init__(self) -> None:
         self.decoder = PppDecoder()
         # uvloop not allow pause a paused transport
         self.paused = False
         # for fixing uvloop bug
         self.exited = False
+        self.sstp: Any = None
+        self.remote: str | None = None
+        self.transport: asyncio.SubprocessTransport | None = None
+        self.write_transport: asyncio.WriteTransport | None = None
+        self.read_transport: asyncio.ReadTransport | None = None
 
-    def write_frame(self, frame):
-        self.write_transport.write(escape(frame))
+    def write_frame(self, frame: bytes) -> None:
+        if self.write_transport:
+            self.write_transport.write(escape(frame))
 
-    def connection_made(self, transport):
-        self.transport = transport
-        self.write_transport = transport.get_pipe_transport(STDIN)
-        self.read_transport = transport.get_pipe_transport(STDOUT)
+    def connection_made(self, transport: asyncio.BaseTransport) -> None:
+        self.transport = transport  # type: ignore
+        self.write_transport = transport.get_pipe_transport(STDIN)  # type: ignore
+        self.read_transport = transport.get_pipe_transport(STDOUT)  # type: ignore
 
-    def pipe_data_received(self, fd, data):
+    def pipe_data_received(self, fd: int, data: bytes) -> None:
         if fd == STDOUT:
             self.out_received(data)
         else:
             self.err_received(data)
 
-    def out_received(self, data):
+    def out_received(self, data: bytes) -> None:
         if __debug__:
             self.sstp.logging.log(VERBOSE, "Raw data: %s", hexdump(data))
         frames = self.decoder.unescape(data)
         self.sstp.write_ppp_frames(frames)
 
-    def err_received(self, data):
+    def err_received(self, data: bytes) -> None:
         self.sstp.logging.warn("Received errors from pppd.")
         self.sstp.logging.warn(data)
 
-    def connection_lost(self, err):
-        if err is None:
+    def connection_lost(self, exc: Exception | None) -> None:
+        if exc is None:
             self.sstp.logging.debug("pppd closed with EoF")
         else:
-            self.sstp.logging.info("pppd closed with error: %s", err)
+            self.sstp.logging.info("pppd closed with error: %s", exc)
 
-    def process_exited(self):
+    def process_exited(self) -> None:
         # uvloop 0.8.0 dosen't call this callback
-        self._process_exited(self.transport.get_returncode())
+        if self.transport:
+            self._process_exited(self.transport.get_returncode())
 
-    def _process_exited(self, returncode):
+    def _process_exited(self, returncode: int | None) -> None:
         if self.exited:
             return
         self.exited = True
         self.sstp.logging.info("pppd exited with code %s.", returncode)
         self.sstp.ppp_stopped()
 
-    def pipe_connection_lost(self, fd, exc):
+    def pipe_connection_lost(self, fd: int, exc: Exception | None) -> None:
         if fd != STDOUT:
             return
         # uvloop 0.8.0 dosen't wait for exited pppd process,
         # so we try to wait here
-        pid = self.transport.get_pid()
+        if self.transport:
+            pid = self.transport.get_pid()
+        else:
+            pid = None
 
-        def wait_pppd():
+        def wait_pppd() -> None:
             if self.exited:
                 return  # not bug, not need to fix
             try:
-                pid, returncode = os.waitpid(-1, os.WNOHANG)
-                self._process_exited(-returncode)
+                if pid is not None:
+                    pid_res, returncode = os.waitpid(-1, os.WNOHANG)
+                    self._process_exited(-returncode)
             except OSError as e:
                 self.sstp.logging.warning("fail to wait for pppd", e)
 
         asyncio.get_event_loop().call_later(1, wait_pppd)
 
-    def pause_producing(self):
+    def pause_producing(self) -> None:
         if not self.paused:
             self.paused = True
             self.sstp.logging.debug("Pause producting")
-            self.read_transport.pause_reading()
+            if self.read_transport:
+                self.read_transport.pause_reading()
 
-    def resume_producing(self):
+    def resume_producing(self) -> None:
         if self.paused:
             self.paused = False
             self.sstp.logging.debug("Resume producing")
-            self.read_transport.resume_reading()
+            if self.read_transport:
+                self.read_transport.resume_reading()
 
 
 class PPPDProtocolFactory:
-    def __init__(self, callback, remote):
+    def __init__(self, callback: Any, remote: str) -> None:
         self.sstp = callback
         self.remote = remote
 
-    def __call__(self):
+    def __call__(self) -> PPPDProtocol:
         proto = PPPDProtocol()
         proto.sstp = self.sstp
         proto.remote = self.remote
@@ -140,34 +152,36 @@ class PPPDSSTPAPIProtocol(asyncio.Protocol):
         SSTP_API_ATTR_ADDR: "SSTP_API_ATTR_ADDR",
     }
 
-    def __init__(self):
-        self.sstp = None
-        self.master_send_key = None
-        self.master_recv_key = None
+    def __init__(self) -> None:
+        self.sstp: Any = None
+        self.master_send_key: bytes | None = None
+        self.master_recv_key: bytes | None = None
+        self.transport: asyncio.BaseTransport | None = None
 
-    def connection_made(self, transport):
+    def connection_made(self, transport: asyncio.BaseTransport) -> None:
         sockname = transport.get_extra_info("sockname")
-        self.sstp.logging.info("Initiate PPP SSTP API protocol on %s.", sockname)
+        if self.sstp:
+            self.sstp.logging.info("Initiate PPP SSTP API protocol on %s.", sockname)
         self.transport = transport
 
-    def message_type(self, mtype):
+    def message_type(self, mtype: int) -> str:
         return self.message_str.get(mtype, self.message_str[self.SSTP_API_MSG_UNKNOWN])
 
-    def is_auth_message(self, mtype):
+    def is_auth_message(self, mtype: int) -> bool:
         return mtype is self.SSTP_API_MSG_AUTH
 
-    def attribute_type(self, atype):
+    def attribute_type(self, atype: int) -> str:
         return self.attribute_str.get(
             atype, self.attribute_str[self.SSTP_API_ATTR_UNKNOWN]
         )
 
-    def is_mppe_send_attribute(self, atype):
+    def is_mppe_send_attribute(self, atype: int) -> bool:
         return atype is self.SSTP_API_ATTR_MPPE_SEND
 
-    def is_mppe_recv_attribute(self, atype):
+    def is_mppe_recv_attribute(self, atype: int) -> bool:
         return atype is self.SSTP_API_ATTR_MPPE_RECV
 
-    def handle_attribute(self, atype, adata):
+    def handle_attribute(self, atype: int, adata: bytes) -> None:
         if self.is_mppe_send_attribute(atype):
             self.master_send_key = adata
             if __debug__:
@@ -181,7 +195,7 @@ class PPPDSSTPAPIProtocol(asyncio.Protocol):
                     "PPP master receive key %s", hexlify(self.master_recv_key)
                 )
 
-    def message_parse(self, message):
+    def message_parse(self, message: bytes) -> bool:
         idx = 0
         while idx < len(message):
             if idx + 4 > len(message):
@@ -199,12 +213,13 @@ class PPPDSSTPAPIProtocol(asyncio.Protocol):
 
         return idx == len(message)
 
-    def data_received(self, message):
+    def data_received(self, message: bytes) -> None:
         # magic 'sstp' as 32-bits integer in network order
         magic = b"\x70\x74\x73\x73"
         # ack whatever received and close connection
         ack = magic + b"\x00\x00" + b"\x03\x00"
-        self.transport.write(ack)
+        if self.transport:
+            self.transport.write(ack)
         self.close()
         if message[0:4] != magic:
             self.sstp.logging.error(
@@ -229,16 +244,17 @@ class PPPDSSTPAPIProtocol(asyncio.Protocol):
             self.master_send_key, self.master_recv_key
         )
 
-    def close(self):
+    def close(self) -> None:
         self.sstp.logging.info("Finished PPP SSTP API protocol.")
-        self.transport.close()
+        if self.transport:
+            self.transport.close()
 
 
 class PPPDSSTPPluginFactory:
-    def __init__(self, callback):
+    def __init__(self, callback: Any) -> None:
         self.sstp = callback
 
-    def __call__(self):
+    def __call__(self) -> PPPDSSTPAPIProtocol:
         proto = PPPDSSTPAPIProtocol()
         proto.sstp = self.sstp
         return proto

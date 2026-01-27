@@ -2,11 +2,11 @@ import binascii
 
 
 class hexdump:
-    def __init__(self, s):
+    def __init__(self, s: bytes) -> None:
         self.s = s
 
-    def __str__(self):
+    def __str__(self) -> str:
         return binascii.hexlify(self.s).decode()
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return str(self)

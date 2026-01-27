@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import sys
-from tty import setcbreak, TCSANOW
 import time
 
 
@@ -14,7 +13,7 @@ IP1_EN = (
 )
 
 
-def main():
+def main() -> None:
     if "file" not in sys.argv:
         sys.exit(1)
     # setcbreak(stdin, TCSANOW)
