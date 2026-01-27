@@ -137,7 +137,7 @@ class SSTPProtocol(Protocol):
                 self.logger.info("Unregistered address %s", self.pppd.remote)
         if self.hello_timer:
             self.hello_timer.cancel()
-        self.ppp_sstp_api_close()
+        self.close_ppp_sstp_api()
 
     def proxy_protocol_data_received(self, data: bytes) -> None:
         self.receive_buf.extend(data)
@@ -451,9 +451,8 @@ class SSTPProtocol(Protocol):
         server = task.result()
         self.ppp_sstp = server
 
-    def ppp_sstp_api_close(self) -> None:
+    def close_ppp_sstp_api(self) -> None:
         if self.ppp_sstp is not None:
-            # ppp_sstp is an AbstractServer
             if self.ppp_sstp.sockets:
                 socks = list(map(lambda s: s.getsockname(), self.ppp_sstp.sockets))
             else:
@@ -529,17 +528,16 @@ class SSTPProtocol(Protocol):
         self.sstp_call_connected_crypto_binding(mac_hash)
 
     def sstp_call_connected_crypto_binding(self, mac_hash: bytes) -> None:
-        if self.hlak is None:
-            self.logger.error(
-                "Failed to verify Crypto Binding, as the "
-                "Higher Layer Authentication Key is missing."
-            )
-            self.abort(ATTRIB_STATUS_INVALID_FRAME_RECEIVED)
-            return
+        # [MS-SSTP] 3.2.5.{2,4} - If the higher-layer PPP authentication method
+        # did not generate any keys, or if PPP authentication is bypassed, then
+        # the HLAK MUST be 32 octets of 0x00
+        hlak = self.hlak or bytes(32)
 
-        hash_type = (CERT_HASH_PROTOCOL_SHA1, CERT_HASH_PROTOCOL_SHA256)[
-            len(mac_hash) == 32
-        ]
+        hash_type = (
+            CERT_HASH_PROTOCOL_SHA256
+            if len(mac_hash) == 32
+            else CERT_HASH_PROTOCOL_SHA1
+        )
 
         # reconstruct Call Connect message with zeroed CMAC field
         cc_msg = bytes((0x10, 0x01, 0x00, 0x70))
@@ -563,28 +561,21 @@ class SSTPProtocol(Protocol):
             hash_type == CERT_HASH_PROTOCOL_SHA256
         ]
 
-        # [MS-SSTP] 3.2.5.{2,4} - If the higher-layer PPP authentication method
-        # did not generate any keys, or if PPP authentication is bypassed, then
-        # the HLAK MUST be 32 octets of 0x00
-        for hlak in self.hlak, bytes(32):
-            # T1 = HMAC(HLAK, S | LEN | 0x01)
-            t1 = hmac.new(hlak, digestmod=cmk_digest)
+        # T1 = HMAC(HLAK, S | LEN | 0x01)
+        t1 = hmac.new(hlak, digestmod=cmk_digest)
 
-            # CMK len (length of digest) - 16-bits little endian
-            cmk_len = bytes((t1.digest_size, 0))
+        # CMK len (length of digest) - 16-bits little endian
+        cmk_len = bytes((t1.digest_size, 0))
 
-            t1.update(cmk_seed)
-            t1.update(cmk_len)
-            t1.update(b"\x01")
+        t1.update(cmk_seed)
+        t1.update(cmk_len)
+        t1.update(b"\x01")
 
-            cmk = t1.digest()
+        cmk = t1.digest()
 
-            # CMAC = HMAC(CMK, CC_MSG)
-            cmac = hmac.new(cmk, digestmod=cmk_digest)
-            cmac.update(cc_msg)
-
-            if hmac.compare_digest(cmac.digest(), mac_hash):
-                break
+        # CMAC = HMAC(CMK, CC_MSG)
+        cmac = hmac.new(cmk, digestmod=cmk_digest)
+        cmac.update(cc_msg)
 
         if __debug__:
             self.logger.debug("Crypto Binding CMK: %s", t1.hexdigest())
@@ -745,7 +736,9 @@ class SSTPProtocol(Protocol):
         self.state = State.CALL_DISCONNECT_ACK_PENDING
         self.loop.call_later(3, self.close_transport)
 
-    def higher_layer_authentication_key(self, send_key: bytes, recv_key: bytes) -> None:
+    def higher_layer_authentication_key_received(
+        self, send_key: bytes, recv_key: bytes
+    ) -> None:
         # [MS-SSTP] 3.2.5.2 - crypto binding - server mode
         hlak = recv_key + send_key
         # ensure hlak is 32 bytes long
@@ -756,7 +749,7 @@ class SSTPProtocol(Protocol):
         self.logger.info("Received Higher Layer Authentication Key.")
         self.logger.debug("Configured HLAK as %s", self.hlak.hex())
 
-        self.ppp_sstp_api_close()
+        self.close_ppp_sstp_api()
 
         if self.client_cmac is not None:
             self.sstp_call_connected_crypto_binding(self.client_cmac)

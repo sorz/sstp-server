@@ -1,5 +1,6 @@
 import asyncio
 import os
+from asyncio import Transport
 from binascii import hexlify
 from typing import Any
 
@@ -156,12 +157,13 @@ class PPPDSSTPAPIProtocol(asyncio.Protocol):
         self.sstp: Any = None
         self.master_send_key: bytes | None = None
         self.master_recv_key: bytes | None = None
-        self.transport: asyncio.BaseTransport | None = None
+        self.transport: Transport | None = None
 
     def connection_made(self, transport: asyncio.BaseTransport) -> None:
         sockname = transport.get_extra_info("sockname")
         if self.sstp:
             self.sstp.logger.info("Initiate PPP SSTP API protocol on %s.", sockname)
+        assert isinstance(transport, Transport)
         self.transport = transport
 
     def message_type(self, mtype: int) -> str:
@@ -213,7 +215,7 @@ class PPPDSSTPAPIProtocol(asyncio.Protocol):
 
         return idx == len(message)
 
-    def data_received(self, message: bytes) -> None:
+    def data_received(self, data: bytes) -> None:
         # magic 'sstp' as 32-bits integer in network order
         magic = b"\x70\x74\x73\x73"
         # ack whatever received and close connection
@@ -221,24 +223,24 @@ class PPPDSSTPAPIProtocol(asyncio.Protocol):
         if self.transport:
             self.transport.write(ack)
         self.close()
-        if message[0:4] != magic:
-            self.sstp.logger.error("SSTP API message - invalid magic %a.", message[0:4])
+        if data[0:4] != magic:
+            self.sstp.logger.error("SSTP API message - invalid magic %a.", data[0:4])
             return
-        length = (message[5] << 8) | message[4]
-        if length + 8 != len(message):
+        length = (data[5] << 8) | data[4]
+        if length + 8 != len(data):
             self.sstp.logger.error("SSTP API message - incorrect length.")
             return
-        if not self.message_parse(message[8:]):
+        if not self.message_parse(data[8:]):
             self.sstp.logger.error("SSTP API message - failed parsing attributes.")
             return
-        mtype = (message[7] << 8) | message[6]
+        mtype = (data[7] << 8) | data[6]
         if self.is_auth_message(mtype):
             if self.master_send_key is None or self.master_recv_key is None:
                 self.sstp.logger.error(
                     "SSTP API message - missing master send and/or receive key."
                 )
                 return
-        self.sstp.higher_layer_authentication_key(
+        self.sstp.higher_layer_authentication_key_received(
             self.master_send_key, self.master_recv_key
         )
 
