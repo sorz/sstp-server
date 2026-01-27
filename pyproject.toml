@@ -8,6 +8,7 @@ description = "Secure Socket Tunneling Protocol (SSTP) VPN server."
 authors = [
     { name = "Shell Chen", email = "me@sorz.org" }
 ]
+license = "MIT"
 urls = { Repository = "https://github.com/sorz/sstp-server" }
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -15,7 +16,6 @@ classifiers = [
     "Programming Language :: Python :: 3 :: Only",
     "Topic :: Internet",
     "Topic :: Internet :: Proxy Servers",
-    "License :: OSI Approved :: MIT License",
 ]
 requires-python = ">=3.12"
 dependencies = []
