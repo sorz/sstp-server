@@ -11,7 +11,7 @@ Requirements
 * Python >= 3.12
 * pppd
 
-**Crypto Binding** is supported using *SSTP ppp API* plug-in 
+**Crypto Binding** is supported using *SSTP ppp API* plug-in
 sstp-pppd-plugin.so from
 `sstp-client <http://sstp-client.sourceforge.net/>`_.
 
@@ -20,16 +20,19 @@ Install
 
 For a quick test, you can use `uv <https://docs.astral.sh/uv/>`_ to run it:
 ::
+
     uvx --from sstp-server sstpd --help
 
 
 Run unreleased GitHub version with uvx:
 ::
+
     uvx --from git+https://github.com/sorz/sstp-server sstpd --help
 
 
 Traditional pip install is also possible:
 ::
+
     pip install sstp-server
     sstpd --help
 
@@ -86,4 +89,3 @@ Known Issues
 
 .. |PyPI version| image:: https://img.shields.io/pypi/v/sstp-server.svg?style=flat
         :target: https://pypi.python.org/pypi/sstp-server
-

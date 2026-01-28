@@ -95,121 +95,123 @@ def main():
     setup_netns()
     setup_cgroup()
 
-    # Create temp directory for configs & logs
-    with tempfile.TemporaryDirectory() as tmpdir:
-        print(f"Using temp dir: {tmpdir}")
-        tmp = Path(tmpdir)
+    # Create directory for configs & logs
+    tmp = Path("benchmark")
+    tmp.mkdir(exist_ok=True)
+    print(f"Using dir: {tmp}")
 
-        # Generate pppd options
-        pppd_opts = tmp / "options.sstpd"
-        with pppd_opts.open("w") as f:
-            f.writelines(
-                [
-                    f"ifname {IFNAME}\n",
-                    "noauth\n",
-                    "nodefaultroute\n",
-                    "nologfd\n",
-                    "debug\n",
-                    "noipv6\n",
-                ]
-            )
-
-        # Launch sstp serveer
-        print("Starting sstpd server...")
-        sstpd_cmd = [
-            "uv",
-            "run",
-            "sstpd",
-            "-l",
-            SERVER_IP,
-            "-p",
-            str(SSTP_PORT),
-            "-c",
-            str(CERT_PATH),
-            "--local",
-            PPP_SERVER_IP,
-            "--remote",
-            "10.0.0.0/24",
-            "--range",
-            f"{PPP_CLIENT_IP}-{PPP_CLIENT_IP}",
-            "--pppd",
-            shutil.which("pppd"),
-            "--pppd-config",
-            str(pppd_opts),
-        ]
-        server_log = tmp / "server.log"
-        server_proc = popen(sstpd_cmd, stdout=server_log.open("w"))
-        time.sleep(2)
-        if server_proc.poll() is not None:
-            print("Error: sstpd failed to start. Check server.log")
-            sys.exit(1)
-
-        # Launch sstp client
-        print("Starting sstpc client...")
-        sstpc_cmd = ns_exec + [
-            "sstpc",
-            "--log-level",
-            "4",
-            "--log-stdout",
-            "--ca-cert",
-            str(CERT_PATH),
-            "--cert-warn",
-            f"{SERVER_IP}:{SSTP_PORT}",
-            "noauth",
-            "nologfd",
-            "noipdefault",
-            "debug",
-            "noipv6",
-        ]
-        client_log = tmp / "client.log"
-        popen(sstpc_cmd, stdout=client_log.open("w"), stderr=STDOUT)
-
-        # Wait for PPP interfaces
-        print("Waiting for PPP connection establishment...")
-        connected = False
-        for _ in range(5):
-            res_srv = run_cmd(
-                ["ip", "addr", "show", IFNAME], check=False, stdout=DEVNULL
-            )
-            res_cli = run_cmd(
-                ns_exec + ["ip", "addr", "show", "ppp0"],
-                check=False,
-                stdout=DEVNULL,
-            )
-            if res_srv.returncode == 0 and res_cli.returncode == 0:
-                print("Connection established!")
-                connected = True
-                break
-            time.sleep(1)
-
-        if not connected:
-            print("Error: Connection timed out.")
-            print("Server Log Tail:")
-            run_cmd(["tail", "-n", "25", str(server_log)], check=False)
-            print("Client Log Tail:")
-            run_cmd(["tail", "-n", "25", str(client_log)], check=False)
-            sys.exit(1)
-
-        # Run iperf3 server
-        print("\nStarting iperf3 benchmark...")
-        iperf_srv_cmd = ["iperf3", "-sB", PPP_SERVER_IP]
-        popen(iperf_srv_cmd, stdout=DEVNULL, stderr=DEVNULL)
-        time.sleep(1)
-
-        # Run iperf3 client
-        print(f"Running iperf3 client (Upload) connecting to {PPP_SERVER_IP}...")
-        subprocess.run(
-            ns_exec + ["iperf3", "-c", PPP_SERVER_IP],
-            preexec_fn=add_self_to_cgroup,
-        )
-        time.sleep(1)
-        print(f"\nRunning iperf3 client (Download) connecting to {PPP_SERVER_IP}...")
-        subprocess.run(
-            ns_exec + ["iperf3", "-Rc", PPP_SERVER_IP],
-            preexec_fn=add_self_to_cgroup,
+    # Generate pppd options
+    pppd_opts = tmp / "options.sstpd"
+    with pppd_opts.open("w") as f:
+        f.writelines(
+            [
+                f"ifname {IFNAME}\n",
+                "noauth\n",
+                "nodefaultroute\n",
+                "nologfd\n",
+                "debug\n",
+                "noipv6\n",
+                f"logfile {tmp / 'pppd-server.log'}\n",
+            ]
         )
 
-        # Processes are now cleaned up by atexit cleanup() -> remove_cgroup()
+    # Launch sstp serveer
+    print("Starting sstpd server...")
+    sstpd_cmd = [
+        "uv",
+        "run",
+        "sstpd",
+        "-l",
+        SERVER_IP,
+        "-p",
+        str(SSTP_PORT),
+        "-c",
+        str(CERT_PATH),
+        "--local",
+        PPP_SERVER_IP,
+        "--remote",
+        "10.0.0.0/24",
+        "--range",
+        f"{PPP_CLIENT_IP}-{PPP_CLIENT_IP}",
+        "--pppd",
+        shutil.which("pppd"),
+        "--pppd-config",
+        str(pppd_opts),
+        # "-v", "10",
+    ]
+    server_log = tmp / "server.log"
+    server_proc = popen(sstpd_cmd)
+    time.sleep(2)
+    if server_proc.poll() is not None:
+        print("Error: sstpd failed to start. Check server.log")
+        sys.exit(1)
+
+    # Launch sstp client
+    print("Starting sstpc client...")
+    sstpc_cmd = ns_exec + [
+        "sstpc",
+        "--log-level",
+        "4",
+        "--log-stdout",
+        "--ca-cert",
+        str(CERT_PATH),
+        "--cert-warn",
+        f"{SERVER_IP}:{SSTP_PORT}",
+        "noauth",
+        "nologfd",
+        "noipdefault",
+        "debug",
+        "noipv6",
+        "logfile",
+        str(tmp / "pppd-client.log"),
+    ]
+    client_log = tmp / "client.log"
+    popen(sstpc_cmd, stdout=client_log.open("w"), stderr=STDOUT)
+
+    # Wait for PPP interfaces
+    print("Waiting for PPP connection establishment...")
+    connected = False
+    for _ in range(5):
+        res_srv = run_cmd(["ip", "addr", "show", IFNAME], check=False, stdout=DEVNULL)
+        res_cli = run_cmd(
+            ns_exec + ["ip", "addr", "show", "ppp0"],
+            check=False,
+            stdout=DEVNULL,
+        )
+        if res_srv.returncode == 0 and res_cli.returncode == 0:
+            print("Connection established!")
+            connected = True
+            break
+        time.sleep(1)
+
+    if not connected:
+        print("Error: Connection timed out.")
+        print("Server Log Tail:")
+        run_cmd(["tail", "-n", "25", str(server_log)], check=False)
+        print("Client Log Tail:")
+        run_cmd(["tail", "-n", "25", str(client_log)], check=False)
+        sys.exit(1)
+
+    # Run iperf3 server
+    print("\nStarting iperf3 benchmark...")
+    iperf_srv_cmd = ["iperf3", "-sB", PPP_SERVER_IP]
+    popen(iperf_srv_cmd, stdout=DEVNULL, stderr=DEVNULL)
+    time.sleep(2)
+
+    # Run iperf3 client
+    print(f"Running iperf3 client (Upload) connecting to {PPP_SERVER_IP}...")
+    subprocess.run(
+        ns_exec + ["iperf3", "-c", PPP_SERVER_IP],
+        preexec_fn=add_self_to_cgroup,
+    )
+    time.sleep(1)
+    print(f"\nRunning iperf3 client (Download) connecting to {PPP_SERVER_IP}...")
+    subprocess.run(
+        ns_exec + ["iperf3", "-Rc", PPP_SERVER_IP],
+        preexec_fn=add_self_to_cgroup,
+    )
+
+    # Processes are now cleaned up by atexit cleanup() -> remove_cgroup()
 
 
 if __name__ == "__main__":
