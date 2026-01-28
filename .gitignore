@@ -24,6 +24,7 @@ parts/
 sdist/
 var/
 *.egg-info/
+wheelhouse/
 .installed.cfg
 *.egg
 
