@@ -76,14 +76,12 @@ def _get_args() -> argparse.Namespace:
         "-n",
         "--no-ssl",
         action="store_true",
-        help="Use plain HTTP instead of HTTPS. "
-        "Useful when running behind a reverse proxy."
-        "Enables X-Forwarded-For HTTP header processing.",
+        help="Use plain HTTP behind a reverse proxy. Trust X-Forwarded-For header.",
     )
     parser.add_argument(
         "--proxy-protocol",
         action="store_true",
-        help="Enable PROXY PROTOCOL, imply --no-ssl",
+        help="Enable PROXY protocol (for client IP), imply --no-ssl",
     )
     parser.add_argument("--pppd", metavar="PPPD-FILE")
     parser.add_argument(
@@ -197,7 +195,7 @@ def main() -> None:
             sock.setsockopt(IPPROTO_TCP, TCP_NODELAY, 1)
 
     if args.proxy_protocol:
-        logging.info("PROXY PROTOCOL is activated.")
+        logging.info("PROXY protocol is activated.")
     if on_unix_socket:
         logging.info("Listening on %s...", args.listen)
     else:
