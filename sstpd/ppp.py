@@ -46,10 +46,6 @@ class PTYSender(asyncio.Protocol):
 class PPPDProtocol(asyncio.SubprocessProtocol):
     def __init__(self, master_fd: int, slave_fd: int) -> None:
         self.decoder = PppDecoder()
-        # uvloop not allow pause a paused transport
-        self.paused = False
-        # for fixing uvloop bug
-        self.exited = False
         self.sstp: Any = None
         self.remote: str | None = None
         self.master_fd = master_fd
@@ -106,50 +102,20 @@ class PPPDProtocol(asyncio.SubprocessProtocol):
             self.pty_file.close()
 
     def process_exited(self) -> None:
-        # uvloop 0.8.0 dosen't call this callback
-        if self.transport:
-            self._process_exited(self.transport.get_returncode())
-
-    def _process_exited(self, returncode: int | None) -> None:
-        if self.exited:
-            return
-        self.exited = True
-        self.sstp.logger.info("pppd exited with code %s.", returncode)
+        if self.transport is not None:
+            returncode = self.transport.get_returncode()
+            self.sstp.logger.info("pppd exited with code %s", returncode)
         self.sstp.ppp_stopped()
 
-    def pipe_connection_lost(self, fd: int, exc: Exception | None) -> None:
-        # uvloop 0.8.0 dosen't wait for exited pppd process,
-        # so we try to wait here
-        if self.transport:
-            pid = self.transport.get_pid()
-        else:
-            pid = None
-
-        def wait_pppd() -> None:
-            if self.exited:
-                return  # not bug, not need to fix
-            try:
-                if pid is not None:
-                    pid_res, returncode = os.waitpid(-1, os.WNOHANG)
-                    self._process_exited(-returncode)
-            except OSError as e:
-                self.sstp.logger.warning("fail to wait for pppd", e)
-
-        asyncio.get_event_loop().call_later(1, wait_pppd)
-
     def pause_producing(self) -> None:
-        if not self.paused:
-            self.paused = True
-            self.sstp.logger.debug("Pause producting")
-            if self.read_transport:
-                self.read_transport.pause_reading()
+        self.sstp.logger.debug("Pause producting")
+        if self.read_transport:
+            self.read_transport.pause_reading()
 
     def resume_producing(self) -> None:
-        if self.paused:
-            self.paused = False
-            self.sstp.logger.debug("Resume producing")
-            if self.read_transport:
-                self.read_transport.resume_reading()
+        self.sstp.logger.debug("Resume producing")
+        if self.read_transport:
+            self.read_transport.resume_reading()
 
 
 class PPPDProtocolFactory:

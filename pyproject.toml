@@ -17,9 +17,6 @@ requires-python = ">=3.12"
 dependencies = []
 dynamic = ["version", "readme"]
 
-[project.optional-dependencies]
-uvloop = ["uvloop>=0.18.0"]
-
 [project.scripts]
 sstpd = "sstpd:run"
 
@@ -35,4 +32,3 @@ ext-modules = [
 [tool.setuptools.dynamic]
 version = {attr = "sstpd.__version__"}
 readme = {file = ["README.rst"]}
-

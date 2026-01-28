@@ -7,11 +7,6 @@ from binascii import hexlify
 from configparser import ConfigParser, NoSectionError
 from socket import IPPROTO_TCP, TCP_NODELAY
 
-try:
-    import uvloop
-except ImportError:
-    uvloop = None
-
 from . import __doc__, certtool
 from .address import IPPool
 from .sstp import SSTPProtocolFactory
@@ -171,16 +166,7 @@ def main() -> None:
         logging.warning("--pem_cert not given, hash checking disabled")
     on_unix_socket = args.listen.startswith("/")
 
-    if uvloop is None:
-        logging.info("Running without uvloop")
-    else:
-        uvloop.install()
-        logging.info("Using uvloop")
-    try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+    loop = asyncio.get_event_loop()
     factory = SSTPProtocolFactory(args, remote_pool=ippool, cert_hash=cert_hash)
     if on_unix_socket:
         coro = loop.create_unix_server(factory, args.listen, ssl=ssl_ctx)
