@@ -3,9 +3,11 @@ import hashlib
 import hmac
 import logging
 import os
+import pty
 import struct
 import subprocess
 import tempfile
+import tty
 from asyncio import Protocol, Server, SubprocessTransport, Task, Transport
 from binascii import hexlify
 from collections.abc import MutableMapping
@@ -387,13 +389,14 @@ class SSTPProtocol(Protocol):
             remote = str(remote_ip)
             self.logger.info("Registered address %s", remote)
 
-        address_argument = "%s:%s" % (self.factory.local, remote)
+        master_fd, slave_fd = pty.openpty()
+        tty.setraw(slave_fd)
         args = [
-            "notty",
+            os.ttyname(slave_fd),
             "file",
             self.factory.pppd_config_file,
-            "115200",
-            address_argument,
+            "%s:%s" % (self.factory.local, remote),
+            "nodetach",
         ]
         if self.factory.pppd_sstp_api_plugin is not None:
             # create a unique socket filename
@@ -424,7 +427,9 @@ class SSTPProtocol(Protocol):
         if self.remote_port is not None:
             ppp_env["SSTP_REMOTE_PORT"] = str(self.remote_port)
 
-        factory = PPPDProtocolFactory(callback=self, remote=remote)
+        factory = PPPDProtocolFactory(
+            callback=self, remote=remote, master_fd=master_fd, slave_fd=slave_fd
+        )
         coro = self.loop.subprocess_exec(factory, self.factory.pppd, *args, env=ppp_env)
         task = asyncio.ensure_future(coro)
         task.add_done_callback(self.pppd_started)

@@ -2,15 +2,12 @@ import asyncio
 import os
 from asyncio import Transport
 from binascii import hexlify
+from io import FileIO
 from typing import Any
 
 from .codec import PppDecoder, escape  # type: ignore
 from .constants import VERBOSE
 from .utils import hexdump
-
-STDIN = 0
-STDOUT = 1
-STDERR = 2
 
 
 def is_ppp_control_frame(frame: bytes) -> bool:
@@ -21,8 +18,33 @@ def is_ppp_control_frame(frame: bytes) -> bool:
     return protocol[0] in (0x80, 0x82, 0xC0, 0xC2, 0xC4)
 
 
+class PTYReceiver(asyncio.Protocol):
+    def __init__(self, pppd: "PPPDProtocol") -> None:
+        self.pppd = pppd
+
+    def connection_made(self, transport: asyncio.BaseTransport) -> None:
+        self.pppd.read_transport = transport  # type: ignore
+
+    def data_received(self, data: bytes) -> None:
+        self.pppd.out_received(data)
+
+    def connection_lost(self, exc: Exception | None) -> None:
+        pass
+
+
+class PTYSender(asyncio.Protocol):
+    def __init__(self, pppd: "PPPDProtocol") -> None:
+        self.pppd = pppd
+
+    def connection_made(self, transport: asyncio.BaseTransport) -> None:
+        self.pppd.write_transport = transport  # type: ignore
+
+    def connection_lost(self, exc: Exception | None) -> None:
+        pass
+
+
 class PPPDProtocol(asyncio.SubprocessProtocol):
-    def __init__(self) -> None:
+    def __init__(self, master_fd: int, slave_fd: int) -> None:
         self.decoder = PppDecoder()
         # uvloop not allow pause a paused transport
         self.paused = False
@@ -30,9 +52,12 @@ class PPPDProtocol(asyncio.SubprocessProtocol):
         self.exited = False
         self.sstp: Any = None
         self.remote: str | None = None
+        self.master_fd = master_fd
+        self.slave_fd = slave_fd
         self.transport: asyncio.SubprocessTransport | None = None
         self.write_transport: asyncio.WriteTransport | None = None
         self.read_transport: asyncio.ReadTransport | None = None
+        self.pty_file: FileIO | None = None
 
     def write_frame(self, frame: bytes) -> None:
         if self.write_transport:
@@ -40,14 +65,22 @@ class PPPDProtocol(asyncio.SubprocessProtocol):
 
     def connection_made(self, transport: asyncio.BaseTransport) -> None:
         self.transport = transport  # type: ignore
-        self.write_transport = transport.get_pipe_transport(STDIN)  # type: ignore
-        self.read_transport = transport.get_pipe_transport(STDOUT)  # type: ignore
+        loop = asyncio.get_event_loop()
+        asyncio.ensure_future(self.setup_pty(loop))
+
+    async def setup_pty(self, loop: asyncio.AbstractEventLoop) -> None:
+        try:
+            os.set_blocking(self.master_fd, False)
+            self.pty_file = os.fdopen(self.master_fd, "rb+", buffering=0)
+            await loop.connect_read_pipe(lambda: PTYReceiver(self), self.pty_file)
+            await loop.connect_write_pipe(lambda: PTYSender(self), self.pty_file)
+        except Exception as e:
+            self.sstp.logger.error("Error setting up PTY: %s", e)
+            if self.transport is not None:
+                self.transport.kill()
 
     def pipe_data_received(self, fd: int, data: bytes) -> None:
-        if fd == STDOUT:
-            self.out_received(data)
-        else:
-            self.err_received(data)
+        self.sstp.logger.info("pppd says", data)
 
     def out_received(self, data: bytes) -> None:
         if __debug__:
@@ -55,15 +88,22 @@ class PPPDProtocol(asyncio.SubprocessProtocol):
         frames = self.decoder.unescape(data)
         self.sstp.write_ppp_frames(frames)
 
-    def err_received(self, data: bytes) -> None:
-        self.sstp.logger.warn("Received errors from pppd.")
-        self.sstp.logger.warn(data)
-
     def connection_lost(self, exc: Exception | None) -> None:
         if exc is None:
             self.sstp.logger.debug("pppd closed with EoF")
         else:
             self.sstp.logger.info("pppd closed with error: %s", exc)
+        try:
+            os.close(self.slave_fd)
+        except OSError:
+            pass
+        if self.pty_file is None:
+            try:
+                os.close(self.master_fd)
+            except OSError:
+                pass
+        else:
+            self.pty_file.close()
 
     def process_exited(self) -> None:
         # uvloop 0.8.0 dosen't call this callback
@@ -78,8 +118,6 @@ class PPPDProtocol(asyncio.SubprocessProtocol):
         self.sstp.ppp_stopped()
 
     def pipe_connection_lost(self, fd: int, exc: Exception | None) -> None:
-        if fd != STDOUT:
-            return
         # uvloop 0.8.0 dosen't wait for exited pppd process,
         # so we try to wait here
         if self.transport:
@@ -115,12 +153,20 @@ class PPPDProtocol(asyncio.SubprocessProtocol):
 
 
 class PPPDProtocolFactory:
-    def __init__(self, callback: Any, remote: str) -> None:
+    def __init__(
+        self,
+        callback: Any,
+        remote: str,
+        master_fd: int,
+        slave_fd: int,
+    ) -> None:
         self.sstp = callback
         self.remote = remote
+        self.master_fd = master_fd
+        self.slave_fd = slave_fd
 
     def __call__(self) -> PPPDProtocol:
-        proto = PPPDProtocol()
+        proto = PPPDProtocol(self.master_fd, self.slave_fd)
         proto.sstp = self.sstp
         proto.remote = self.remote
         return proto
