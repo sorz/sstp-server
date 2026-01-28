@@ -16,24 +16,21 @@ IP1_EN = (
 def main() -> None:
     if "file" not in sys.argv:
         sys.exit(1)
-    # setcbreak(stdin, TCSANOW)
-    stdin = sys.stdin.buffer
-    stdout = sys.stdout.buffer
+    with open(sys.argv[1], "r+b", buffering=0) as f:
+        f.write(LCP1_EN + LCP1_EN[1:])
+        f.flush()
+        assert f.read(len(LCP1_EN)) == LCP1_EN
+        assert f.read(len(LCP1_EN)) == LCP1_EN
 
-    stdout.write(LCP1_EN + LCP1_EN[1:])
-    stdout.flush()
-    assert stdin.read(len(LCP1_EN)) == LCP1_EN
-    assert stdin.read(len(LCP1_EN)) == LCP1_EN
+        time.sleep(0.2)  # waiting for auth ok
 
-    time.sleep(0.2)  # waiting for auth ok
+        f.write(IP1_EN)
+        f.flush()
+        assert f.read(len(IP1_EN)) == IP1_EN
+        f.write(IP1_EN)
+        f.flush()
 
-    stdout.write(IP1_EN)
-    stdout.flush()
-    assert stdin.read(len(IP1_EN)) == IP1_EN
-    stdout.write(IP1_EN)
-    stdout.flush()
-
-    time.sleep(0.2)
+        time.sleep(0.2)
 
 
 if __name__ == "__main__":
