@@ -1,7 +1,6 @@
 sstp-server
 ============
 |PyPI version|
-|Build Status|
 
 A Secure Socket Tunneling Protocol (SSTP) server implemented by Python.
 
@@ -9,10 +8,8 @@ A Secure Socket Tunneling Protocol (SSTP) server implemented by Python.
 Requirements
 ------------
 
-* Python >= 3.4.4
+* Python >= 3.12
 * pppd
-
-For Python 2.7, use v0.4.x
 
 **Crypto Binding** is supported using *SSTP ppp API* plug-in 
 sstp-pppd-plugin.so from
@@ -21,18 +18,24 @@ sstp-pppd-plugin.so from
 Install
 -------
 
-Install from PyPI:
+For a quick test, you can use `uv <https://docs.astral.sh/uv/>`_ to run it:
 ::
+    uvx --from sstp-server sstpd --help
 
-    # pip install sstp-server
 
-Please ensure your pip >= 9.0.1 to get correct version.
-
-Install from GitHub:
+Run unreleased GitHub version with uvx:
 ::
+    uvx --from git+https://github.com/sorz/sstp-server sstpd --help
 
-    # pip install git+https://github.com/sorz/sstp-server.git
 
+Traditional pip install is also possible:
+::
+    pip install sstp-server
+    sstpd --help
+
+
+For a production deployment, you may want create virutal env fisrt,
+then run sstpd with a service manager e.g. systemd.
 
 Arch Linux user may install
 `sstp-server <https://aur.archlinux.org/packages/sstp-server/>`_
@@ -79,16 +82,8 @@ Known Issues
 
 - High CPU usage, may not suitable for high thougthput applications.
 
-License
--------
-The MIT License (MIT)
-
-Copyright (c) 2014-2020 Shell Chen
 
 
 .. |PyPI version| image:: https://img.shields.io/pypi/v/sstp-server.svg?style=flat
         :target: https://pypi.python.org/pypi/sstp-server
-
-.. |Build Status| image:: https://travis-ci.org/sorz/sstp-server.svg?branch=master
-        :target: https://travis-ci.org/sorz/sstp-server
 
