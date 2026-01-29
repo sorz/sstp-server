@@ -805,7 +805,7 @@ class SSTPLogger(logging.LoggerAdapter):
             tag = f"{id}/{host}"
         else:
             tag = id
-        super().__init__(logger, dict(tag=tag), False)
+        super().__init__(logger, dict(tag=tag))
 
     def process(
         self, msg: str, kwargs: MutableMapping[str, Any]
