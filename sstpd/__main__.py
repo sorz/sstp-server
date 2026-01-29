@@ -166,7 +166,7 @@ def main() -> None:
         logging.warning("--pem_cert not given, hash checking disabled")
     on_unix_socket = args.listen.startswith("/")
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.new_event_loop()
     factory = SSTPProtocolFactory(args, remote_pool=ippool, cert_hash=cert_hash)
     if on_unix_socket:
         coro = loop.create_unix_server(factory, args.listen, ssl=ssl_ctx)
