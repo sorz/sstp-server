@@ -21,13 +21,16 @@ dynamic = ["version", "readme"]
 sstpd = "sstpd:run"
 
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=61.0", "wheel", "setuptools-rust"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 packages = ["sstpd"]
+
+[tool.setuptools-rust]
+debug = false
 ext-modules = [
-    {name = "sstpd.codec", sources = ["sstpd/codecmodule.c"]}
+    {target = "sstpd.codec", path = "Cargo.toml", binding = "PyO3"}
 ]
 
 [tool.setuptools.dynamic]

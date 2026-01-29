@@ -1,0 +1,13 @@
+[package]
+name = "sstp-server"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "codec"
+crate-type = ["cdylib"]
+path = "rust/lib.rs"
+
+[dependencies]
+pyo3 = { version = "0.27", features = ["extension-module", "abi3-py311"] }
+bytes = "1"
