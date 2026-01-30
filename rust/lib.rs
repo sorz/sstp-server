@@ -8,10 +8,23 @@ const CONTROL_ESCAPE: u8 = 0x7d;
 const ESCAPE_MASK: u8 = 0x20;
 const MAX_FRAME_SIZE: usize = 9000;
 
+// FLAG_SEQUENCE, CONTROL_ESCAPE, and any < ESCAPE_MASK
+const NEED_ESACPE: [bool; 256] = {
+    let mut table = [false; 256];
+    let mut i = 0;
+    while i < ESCAPE_MASK as usize {
+        table[i] = true;
+        i += 1;
+    }
+    table[FLAG_SEQUENCE as usize] = true;
+    table[CONTROL_ESCAPE as usize] = true;
+    table
+};
+
 #[inline]
 fn escape_to(bytes: &[u8], out: &mut Vec<u8>) {
     for &byte in bytes {
-        if byte < ESCAPE_MASK || byte == FLAG_SEQUENCE || byte == CONTROL_ESCAPE {
+        if NEED_ESACPE[byte as usize] {
             out.push(CONTROL_ESCAPE);
             out.push(byte ^ ESCAPE_MASK);
         } else {
