@@ -10,8 +10,8 @@ from .constants import VERBOSE
 from .utils import hexdump
 
 
-def is_ppp_control_frame(frame: bytes) -> bool:
-    if frame.startswith(b"\xff\x03"):
+def is_ppp_control_frame(frame: memoryview | bytearray) -> bool:
+    if frame[0] == 0xFF and frame[1] == 0x03:
         protocol = frame[2:4]
     else:
         protocol = frame[:2]

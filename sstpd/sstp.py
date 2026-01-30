@@ -712,7 +712,7 @@ class SSTPProtocol(Protocol):
         if self.transport:
             self.transport.close()
 
-    def write_ppp_frames(self, frames: list[bytes]) -> None:
+    def write_ppp_frames(self, frames: list[memoryview | bytearray]) -> None:
         if self.state == State.SERVER_CALL_CONNECTED_PENDING:
             frames = [f for f in frames if is_ppp_control_frame(f)]
         elif self.state != State.SERVER_CALL_CONNECTED:
@@ -720,7 +720,7 @@ class SSTPProtocol(Protocol):
         for frame in frames:
             if __debug__:
                 self.logger.debug("pppd => sstp (%d bytes)", len(frame))
-                self.logger.log(VERBOSE, hexdump(frame))
+                self.logger.log(VERBOSE, hexdump(bytes(frame)))
             if self.transport:
                 SSTPDataPacket(frame).write_to(self.transport.write)
 
