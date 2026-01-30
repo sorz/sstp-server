@@ -9,12 +9,14 @@ const ESCAPE_MASK: u8 = 0x20;
 const MAX_FRAME_SIZE: usize = 9000;
 
 #[inline]
-fn escape_to(byte: u8, out: &mut Vec<u8>) {
-    if byte < ESCAPE_MASK || byte == FLAG_SEQUENCE || byte == CONTROL_ESCAPE {
-        out.push(CONTROL_ESCAPE);
-        out.push(byte ^ ESCAPE_MASK);
-    } else {
-        out.push(byte);
+fn escape_to(bytes: &[u8], out: &mut Vec<u8>) {
+    for &byte in bytes {
+        if byte < ESCAPE_MASK || byte == FLAG_SEQUENCE || byte == CONTROL_ESCAPE {
+            out.push(CONTROL_ESCAPE);
+            out.push(byte ^ ESCAPE_MASK);
+        } else {
+            out.push(byte);
+        }
     }
 }
 
@@ -26,18 +28,18 @@ fn escape<'py>(py: Python<'py>, data: &Bound<'py, PyBytes>) -> PyResult<Bound<'p
     let mut fcs = fcs::Fcs::new();
     buffer.push(FLAG_SEQUENCE);
 
-    // Calculate FCS
-    fcs.update_bytes(data);
-
-    // Escape data
-    for &byte in data {
-        escape_to(byte, &mut buffer);
+    // Safety: transmutes u8 to u64 is safe
+    let (prefix, words, suffix) = unsafe { data.align_to::<u64>() };
+    fcs.update(prefix);
+    escape_to(prefix, &mut buffer);
+    for &word in words {
+        fcs.update_u64(word);
+        escape_to(&word.to_ne_bytes(), &mut buffer);
     }
+    fcs.update(suffix);
+    escape_to(suffix, &mut buffer);
 
-    let fcs = fcs.checksum();
-    escape_to(fcs as u8, &mut buffer);
-    escape_to((fcs >> 8) as u8, &mut buffer);
-
+    escape_to(&fcs.checksum().to_le_bytes(), &mut buffer);
     buffer.push(FLAG_SEQUENCE);
     Ok(PyBytes::new(py, &buffer))
 }

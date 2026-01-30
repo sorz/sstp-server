@@ -47,33 +47,25 @@ impl Fcs {
         Self { value: 0xffff }
     }
 
-    #[inline]
-    pub(crate) fn update(&mut self, byte: u8) {
-        let key = ((self.value as u8) ^ byte) as usize;
-        self.value = (self.value >> 8) ^ FCSTAB[0][key];
+    pub(crate) fn update(&mut self, bytes: &[u8]) {
+        for &byte in bytes {
+            let key = ((self.value as u8) ^ byte) as usize;
+            self.value = (self.value >> 8) ^ FCSTAB[0][key];
+        }
     }
 
-    pub(crate) fn update_bytes(&mut self, data: &[u8]) {
-        // Safety: transmutes u8 to u64 is safe
-        let (prefix, words, suffix) = unsafe { data.align_to::<u64>() };
-        for &b in prefix {
-            self.update(b);
-        }
-        self.value = words.iter().fold(self.value, |fcs, &word| {
-            let idx0 = fcs ^ word as u16;
-            let idx1 = (fcs >> 8) ^ ((word >> 8) as u16);
-            FCSTAB[7][idx0 as u8 as usize]
-                ^ FCSTAB[6][idx1 as u8 as usize]
-                ^ FCSTAB[5][(word >> 16) as u8 as usize]
-                ^ FCSTAB[4][(word >> 24) as u8 as usize]
-                ^ FCSTAB[3][(word >> 32) as u8 as usize]
-                ^ FCSTAB[2][(word >> 40) as u8 as usize]
-                ^ FCSTAB[1][(word >> 48) as u8 as usize]
-                ^ FCSTAB[0][(word >> 56) as u8 as usize]
-        });
-        for &b in suffix {
-            self.update(b);
-        }
+    #[inline]
+    pub(crate) fn update_u64(&mut self, data: u64) {
+        let idx0 = self.value ^ data as u16;
+        let idx1 = (self.value >> 8) ^ ((data >> 8) as u16);
+        self.value = FCSTAB[7][idx0 as u8 as usize]
+            ^ FCSTAB[6][idx1 as u8 as usize]
+            ^ FCSTAB[5][(data >> 16) as u8 as usize]
+            ^ FCSTAB[4][(data >> 24) as u8 as usize]
+            ^ FCSTAB[3][(data >> 32) as u8 as usize]
+            ^ FCSTAB[2][(data >> 40) as u8 as usize]
+            ^ FCSTAB[1][(data >> 48) as u8 as usize]
+            ^ FCSTAB[0][(data >> 56) as u8 as usize];
     }
 
     pub(crate) fn checksum(&self) -> u16 {
@@ -84,22 +76,24 @@ impl Fcs {
 #[test]
 fn test_fcs() {
     let mut fcs = Fcs::new();
-    for i in 0..255 {
-        fcs.update(i as u8);
-    }
+    let bytes: Vec<u8> = (0..255).collect();
+    fcs.update(&bytes);
     assert_eq!(0x7859, fcs.checksum());
 }
 
 #[test]
 fn test_fcs_bytes() {
-    let mut fcs_scalar = Fcs::new();
-    let mut fcs_bytes = Fcs::new();
+    let mut fcs_table = Fcs::new();
+    let mut fcs_slice = Fcs::new();
     let bytes: Vec<u8> = (0..255).chain(0..255).collect();
 
-    for &b in &bytes {
-        fcs_scalar.update(b);
+    fcs_table.update(&bytes);
+    let (prefix, words, suffix) = unsafe { bytes.align_to::<u64>() };
+    fcs_slice.update(prefix);
+    for &word in words {
+        fcs_slice.update_u64(word);
     }
-    fcs_bytes.update_bytes(&bytes);
+    fcs_slice.update(suffix);
 
-    assert_eq!(fcs_scalar.checksum(), fcs_bytes.checksum());
+    assert_eq!(fcs_table.checksum(), fcs_slice.checksum());
 }
