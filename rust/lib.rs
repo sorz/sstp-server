@@ -24,11 +24,13 @@ fn escape<'py>(py: Python<'py>, data: &Bound<'py, PyBytes>) -> PyResult<Bound<'p
     let data = data.as_bytes();
     let mut buffer = Vec::with_capacity((data.len() + 2) * 2 + 2);
     let mut fcs = fcs::Fcs::new();
-
     buffer.push(FLAG_SEQUENCE);
 
+    // Calculate FCS
+    fcs.update_bytes(data);
+
+    // Escape data
     for &byte in data {
-        fcs.update(byte);
         escape_to(byte, &mut buffer);
     }
 
