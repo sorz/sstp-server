@@ -1,5 +1,5 @@
 use pyo3::prelude::*;
-use pyo3::types::PyBytes;
+use pyo3::types::{PyByteArray, PyBytes};
 
 mod fcs;
 
@@ -22,39 +22,53 @@ const NEED_ESACPE: [bool; 256] = {
 };
 
 #[inline]
-fn escape_to(bytes: &[u8], out: &mut Vec<u8>) {
+fn escape_to(bytes: &[u8], out: &mut [u8]) -> usize {
+    let mut pos = 0;
     for &byte in bytes {
         if NEED_ESACPE[byte as usize] {
-            out.push(CONTROL_ESCAPE);
-            out.push(byte ^ ESCAPE_MASK);
+            out[pos] = CONTROL_ESCAPE;
+            out[pos + 1] = byte ^ ESCAPE_MASK;
+            pos += 2;
         } else {
-            out.push(byte);
+            out[pos] = byte;
+            pos += 1
         }
     }
+    pos
 }
 
 /// Escape a PPP frame ending with correct FCS code.
 #[pyfunction]
-fn escape<'py>(py: Python<'py>, data: &Bound<'py, PyBytes>) -> PyResult<Bound<'py, PyBytes>> {
+fn escape<'py>(py: Python<'py>, data: &Bound<'py, PyBytes>) -> PyResult<Bound<'py, PyByteArray>> {
     let data = data.as_bytes();
-    let mut buffer = Vec::with_capacity((data.len() + 2) * 2 + 2);
     let mut fcs = fcs::Fcs::new();
-    buffer.push(FLAG_SEQUENCE);
 
-    // Safety: transmutes u8 to u64 is safe
-    let (prefix, words, suffix) = unsafe { data.align_to::<u64>() };
-    fcs.update(prefix);
-    escape_to(prefix, &mut buffer);
-    for &word in words {
-        fcs.update_u64(word);
-        escape_to(&word.to_ne_bytes(), &mut buffer);
-    }
-    fcs.update(suffix);
-    escape_to(suffix, &mut buffer);
+    let mut buf_pos = 0;
+    let buf = PyByteArray::new_with(py, (data.len() + 2) * 2 + 2, |buf| {
+        buf[buf_pos] = FLAG_SEQUENCE;
+        buf_pos += 1;
 
-    escape_to(&fcs.checksum().to_le_bytes(), &mut buffer);
-    buffer.push(FLAG_SEQUENCE);
-    Ok(PyBytes::new(py, &buffer))
+        // Safety: transmutes u8 to u64 is safe
+        let (prefix, words, suffix) = unsafe { data.align_to::<u64>() };
+        // prefix
+        fcs.update(prefix);
+        buf_pos += escape_to(prefix, &mut buf[buf_pos..]);
+        // middle - fast slice-by-8 fcs
+        for &word in words {
+            fcs.update_u64(word);
+            buf_pos += escape_to(&word.to_ne_bytes(), &mut buf[buf_pos..]);
+        }
+        // suffix
+        fcs.update(suffix);
+        buf_pos += escape_to(suffix, &mut buf[buf_pos..]);
+
+        buf_pos += escape_to(&fcs.checksum().to_le_bytes(), &mut buf[buf_pos..]);
+        buf[buf_pos] = FLAG_SEQUENCE;
+        buf_pos += 1;
+        Ok(())
+    })?;
+    buf.resize(buf_pos)?;
+    Ok(buf)
 }
 
 /// PPP Decoder

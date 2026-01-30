@@ -2,8 +2,7 @@
 import random
 import timeit
 
-from sstpd.codec import escape, PppDecoder
-
+from sstpd.codec import PppDecoder, escape
 
 random.seed(0)
 decoder = PppDecoder()
@@ -19,6 +18,7 @@ def bench_unescape() -> float:
         "decoder.unescape(data)", setup="data = get_enscaped()", globals=globals()
     )
 
+
 def bench_escape() -> float:
     return timeit.timeit(
         "escape(data)", setup="data = random.randbytes(1500)", globals=globals()
@@ -29,7 +29,7 @@ def codec_test() -> None:
     frame = random.randbytes(1500)
     escaped = escape(frame)
     print("escaped: %d bytes " % len(escaped))
-    unescaped = PppDecoder().unescape(escaped)
+    unescaped = PppDecoder().unescape(bytes(escaped))
     assert len(unescaped) == 1
     print("unescaped: %d bytes" % len(unescaped[0]))
     assert unescaped[0] == frame
@@ -37,7 +37,7 @@ def codec_test() -> None:
 
 def main() -> None:
     codec_test()
-    print("Test unescape...")
+    print("Benchmark codec...")
     print("\tescape:   %f" % bench_escape())
     print("\tunescape: %f" % bench_unescape())
 
