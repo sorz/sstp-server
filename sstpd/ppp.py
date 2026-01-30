@@ -76,7 +76,7 @@ class PPPDProtocol(asyncio.SubprocessProtocol):
                 self.transport.kill()
 
     def pipe_data_received(self, fd: int, data: bytes) -> None:
-        self.sstp.logger.info("pppd says", data)
+        self.sstp.logger.info("pppd says %s", data)
 
     def out_received(self, data: bytes) -> None:
         if __debug__:
@@ -89,15 +89,19 @@ class PPPDProtocol(asyncio.SubprocessProtocol):
             self.sstp.logger.debug("pppd closed with EoF")
         else:
             self.sstp.logger.info("pppd closed with error: %s", exc)
+        if self.read_transport is not None:
+            self.read_transport.close()
+        if self.write_transport is not None:
+            self.write_transport.close()
         try:
             os.close(self.slave_fd)
-        except OSError:
-            pass
+        except OSError as err:
+            self.sstp.logger.warning("pty slave close error: %s", err)
         if self.pty_file is None:
             try:
                 os.close(self.master_fd)
-            except OSError:
-                pass
+            except OSError as err:
+                self.sstp.logger.warning("pty master close error: %s", err)
         else:
             self.pty_file.close()
 
