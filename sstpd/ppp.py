@@ -15,7 +15,7 @@ class CompoundMacKey(TypedDict, total=False):
     sha256: bytes
 
 
-def is_ppp_control_frame(frame: memoryview | bytearray) -> bool:
+def is_ppp_control_frame(frame: memoryview | bytearray | bytes) -> bool:
     if frame[0] == 0xFF and frame[1] == 0x03:
         protocol = frame[2:4]
     else:
@@ -69,9 +69,9 @@ class PPPDProtocol(asyncio.SubprocessProtocol):
         self.pty_file: FileIO | None = None
         self.plugin = Plugin(self)
 
-    def write_frame(self, frame: bytes) -> None:
+    def write_frame(self, frame: bytes, full_escape) -> None:
         if self.write_transport:
-            self.write_transport.write(escape(frame))
+            self.write_transport.write(escape(frame, full_escape))
 
     def connection_made(self, transport: asyncio.BaseTransport) -> None:
         assert isinstance(transport, asyncio.SubprocessTransport)

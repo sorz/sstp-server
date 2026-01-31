@@ -3,71 +3,27 @@ use pyo3::prelude::*;
 use pyo3::types::{PyByteArray, PyBytes, PyMemoryView, PySlice};
 
 mod fcs;
+mod encode;
 
 const FLAG_SEQUENCE: u8 = 0x7e;
 const CONTROL_ESCAPE: u8 = 0x7d;
 const ESCAPE_MASK: u8 = 0x20;
 
-// FLAG_SEQUENCE, CONTROL_ESCAPE, and any < ESCAPE_MASK
-const NEED_ESACPE: [bool; 256] = {
-    let mut table = [false; 256];
-    let mut i = 0;
-    while i < ESCAPE_MASK as usize {
-        table[i] = true;
-        i += 1;
-    }
-    table[FLAG_SEQUENCE as usize] = true;
-    table[CONTROL_ESCAPE as usize] = true;
-    table
-};
-
-#[inline]
-fn escape_to(bytes: &[u8], out: &mut [u8]) -> usize {
-    let mut pos = 0;
-    for &byte in bytes {
-        if NEED_ESACPE[byte as usize] {
-            out[pos] = CONTROL_ESCAPE;
-            out[pos + 1] = byte ^ ESCAPE_MASK;
-            pos += 2;
-        } else {
-            out[pos] = byte;
-            pos += 1
-        }
-    }
-    pos
-}
-
 /// Escape a PPP frame ending with correct FCS code.
 #[pyfunction]
-fn escape<'py>(py: Python<'py>, data: &Bound<'py, PyBytes>) -> PyResult<Bound<'py, PyByteArray>> {
+ #[pyo3(signature = (data, full = true))]
+fn escape<'py>(
+    py: Python<'py>,
+    data: &Bound<'py, PyBytes>,
+    full: bool)
+-> PyResult<Bound<'py, PyByteArray>> {
     let data = data.as_bytes();
-    let mut fcs = fcs::Fcs::new();
-
-    let mut buf_pos = 0;
+    let mut len = 0;
     let buf = PyByteArray::new_with(py, (data.len() + 2) * 2 + 2, |buf| {
-        buf[buf_pos] = FLAG_SEQUENCE;
-        buf_pos += 1;
-
-        // Safety: transmutes u8 to u64 is safe
-        let (prefix, words, suffix) = unsafe { data.align_to::<u64>() };
-        // prefix
-        fcs.update(prefix);
-        buf_pos += escape_to(prefix, &mut buf[buf_pos..]);
-        // middle - fast slice-by-8 fcs
-        for &word in words {
-            fcs.update_u64(word);
-            buf_pos += escape_to(&word.to_ne_bytes(), &mut buf[buf_pos..]);
-        }
-        // suffix
-        fcs.update(suffix);
-        buf_pos += escape_to(suffix, &mut buf[buf_pos..]);
-
-        buf_pos += escape_to(&fcs.checksum().to_le_bytes(), &mut buf[buf_pos..]);
-        buf[buf_pos] = FLAG_SEQUENCE;
-        buf_pos += 1;
+        len = encode::encode_frame(full, data, buf);
         Ok(())
     })?;
-    buf.resize(buf_pos)?;
+    buf.resize(len)?;
     Ok(buf)
 }
 

@@ -4,9 +4,8 @@ import logging
 import os
 import pty
 import struct
-import subprocess
 import tty
-from asyncio import Protocol, Server, SubprocessTransport, Task, Transport
+from asyncio import Protocol, SubprocessTransport, Task, Transport
 from binascii import hexlify
 from collections.abc import MutableMapping
 from enum import Enum
@@ -248,13 +247,22 @@ class SSTPProtocol(Protocol):
             self.sstp_control_packet_received(packet, msg_type, attributes)
 
     def sstp_data_packet_received(self, data: bytes) -> None:
-        if self.logger.isEnabledFor(logging.DEBUG):
-            self.logger.debug("sstp => pppd (%s bytes).", len(data))
-            self.logger.log(VERBOSE, hexdump(data))
         if self.pppd is None:
             print("pppd is None.")
             return
-        self.pppd.write_frame(data)
+        if self.state == State.SERVER_CALL_CONNECTED or (
+            self.state == State.SERVER_CALL_CONNECTED_PENDING
+            and is_ppp_control_frame(data)
+        ):
+            if self.logger.isEnabledFor(logging.DEBUG):
+                self.logger.debug("sstp => pppd (%s bytes).", len(data))
+                self.logger.log(VERBOSE, hexdump(data))
+            # LCP may not been done before SERVER_CALL_CONNECTED
+            # assume asyncmap = 0 after fully connected
+            full_escape = self.state != State.SERVER_CALL_CONNECTED
+            self.pppd.write_frame(data, full_escape)
+        else:
+            self.logger.info("drop ppp frame from client")
 
     def sstp_control_packet_received(
         self,
