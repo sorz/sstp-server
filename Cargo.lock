@@ -412,7 +412,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bindgen",
- "digest",
  "hmac",
  "sha1",
  "sha2",

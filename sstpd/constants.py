@@ -1,3 +1,4 @@
+import hashlib
 from enum import Enum
 
 # Log level
@@ -28,9 +29,20 @@ SSTP_ATTRIB_CRYPTO_BINDING_REQ = b"\x04"
 # Protocol ID
 SSTP_ENCAPSULATED_PROTOCOL_PPP = b"\x00\x01"
 
+
 # Hash Protocol Bitmask
-CERT_HASH_PROTOCOL_SHA1 = 0x01
-CERT_HASH_PROTOCOL_SHA256 = 0x02
+class HashProtocol(Enum):
+    SHA1 = 0x01
+    SHA256 = 0x02
+
+    @property
+    def hasher(self):
+        match self:
+            case HashProtocol.SHA1:
+                return hashlib.sha1
+            case HashProtocol.SHA256:
+                return hashlib.sha256
+
 
 # AttribID
 SSTP_ATTRIB_NO_ERROR = b"\x00"

@@ -1,5 +1,4 @@
 import asyncio
-import hashlib
 import hmac
 import logging
 import os
@@ -24,8 +23,6 @@ from .constants import (
     ATTRIB_STATUS_RETRY_COUNT_EXCEEDED,
     ATTRIB_STATUS_UNACCEPTED_FRAME_RECEIVED,
     ATTRIB_STATUS_VALUE_NOT_SUPPORTED,
-    CERT_HASH_PROTOCOL_SHA1,
-    CERT_HASH_PROTOCOL_SHA256,
     SSTP_ATTRIB_CRYPTO_BINDING,
     SSTP_ATTRIB_CRYPTO_BINDING_REQ,
     SSTP_ATTRIB_ENCAPSULATED_PROTOCOL_ID,
@@ -33,6 +30,7 @@ from .constants import (
     SSTP_ATTRIB_STATUS_INFO,
     SSTP_ENCAPSULATED_PROTOCOL_PPP,
     VERBOSE,
+    HashProtocol,
     MsgType,
 )
 from .packets import SSTPControlPacket, SSTPDataPacket
@@ -86,12 +84,6 @@ class SSTPProtocol(Protocol):
         self.correlation_id: str | None = None
         self.remote_host: str | None = None
         self.remote_port: int | None = None
-        # PPP SSTP API
-        self.ppp_sstp: Server | None = None
-        # High(er) LAyer Key (HLAK)
-        self.hlak: bytes | None = None
-        # Client Compound MAC
-        self.client_cmac: bytes | None = None
         self.transport: Transport | None = None
 
     def update_logger(self) -> None:
@@ -138,7 +130,6 @@ class SSTPProtocol(Protocol):
                 self.logger.info("Unregistered address %s", self.pppd.remote)
         if self.hello_timer:
             self.hello_timer.cancel()
-        self.close_ppp_sstp_api()
 
     def proxy_protocol_data_received(self, data: bytes) -> None:
         self.receive_buf.extend(data)
@@ -254,7 +245,7 @@ class SSTPProtocol(Protocol):
                 value = attrs[4:length].tobytes()
                 attrs = attrs[length:]
                 attributes.append((id, value))
-            self.sstp_control_packet_received(msg_type, attributes)
+            self.sstp_control_packet_received(packet, msg_type, attributes)
 
     def sstp_data_packet_received(self, data: bytes) -> None:
         if self.logger.isEnabledFor(logging.DEBUG):
@@ -267,6 +258,7 @@ class SSTPProtocol(Protocol):
 
     def sstp_control_packet_received(
         self,
+        packet: memoryview,
         msg_type: bytes,
         attributes: list[tuple[bytes, bytes]],
     ) -> None:
@@ -301,22 +293,27 @@ class SSTPProtocol(Protocol):
                     )
                     self.abort(ATTRIB_STATUS_INVALID_FRAME_RECEIVED)
                     return
-                hash_type = attr[3]
+                hash_type_id = attr[3]
                 nonce = attr[4:36]
-                if hash_type == CERT_HASH_PROTOCOL_SHA1:
-                    # strip and ignore padding
-                    cert_hash = attr[36:56]
-                    mac_hash = attr[68:88]
-                elif hash_type == CERT_HASH_PROTOCOL_SHA256:
-                    cert_hash = attr[36:68]
-                    mac_hash = attr[68:100]
-                else:
+                try:
+                    hash_type = HashProtocol(hash_type_id)
+                    match hash_type:
+                        case HashProtocol.SHA1:
+                            # strip and ignore padding
+                            cert_hash = attr[36:56]
+                            mac_hash = attr[68:88]
+                        case HashProtocol.SHA256:
+                            cert_hash = attr[36:68]
+                            mac_hash = attr[68:100]
+                except ValueError:
                     self.logger.warning(
-                        "Unsupported hash protocol in Crypto Binding Attribute."
+                        "abort: unsupported hash protocol: %s", hash_type_id
                     )
                     self.abort(ATTRIB_STATUS_INVALID_FRAME_RECEIVED)
                     return
-                self.sstp_call_connected_received(hash_type, nonce, cert_hash, mac_hash)
+                self.sstp_call_connected_received(
+                    packet, hash_type, nonce, cert_hash, mac_hash
+                )
             case MsgType.CALL_ABORT:
                 if attributes:
                     self.sstp_msg_call_abort(attributes[0][1])
@@ -363,9 +360,9 @@ class SSTPProtocol(Protocol):
         # hash protocol bitmask
         hpb = 0
         if self.factory.cert_hash and len(self.factory.cert_hash.sha1) > 0:
-            hpb |= CERT_HASH_PROTOCOL_SHA1
+            hpb |= HashProtocol.SHA1.value
         if self.factory.cert_hash and len(self.factory.cert_hash.sha256) > 0:
-            hpb |= CERT_HASH_PROTOCOL_SHA256
+            hpb |= HashProtocol.SHA256.value
         # 3 bytes reserved + 1 byte hash bitmap + nonce.
         ack.attributes = [
             (
@@ -397,9 +394,7 @@ class SSTPProtocol(Protocol):
             "%s:%s" % (self.factory.local, remote),
             "nodetach",
         ]
-        if self.factory.pppd_sstp_api_plugin is not None:
-            # TODO: add plugin to args
-            pass
+        # TODO: add plugin to args
 
         if self.remote_host is not None:
             args += ["remotenumber", self.remote_host]
@@ -430,37 +425,10 @@ class SSTPProtocol(Protocol):
         self.pppd = protocol
         protocol.resume_producing()
 
-    def ppp_sstp_api(self, task: Task[Server]) -> None:
-        err = task.exception()
-        if err is not None:
-            self.logger.warning("Fail to start PPP SSTP API: %s", err)
-            self.abort()
-            return
-        server = task.result()
-        self.ppp_sstp = server
-
-    def close_ppp_sstp_api(self) -> None:
-        if self.ppp_sstp is not None:
-            if self.ppp_sstp.sockets:
-                socks = list(map(lambda s: s.getsockname(), self.ppp_sstp.sockets))
-            else:
-                socks = []
-
-            self.logger.debug("Close PPP SSTP API.")
-            self.ppp_sstp.close()
-
-            for sock in socks:
-                try:
-                    self.logger.debug("Remove SSTP API sock %s", sock)
-                    os.remove(sock)
-                except Exception:
-                    pass
-
-            self.ppp_sstp = None
-
     def sstp_call_connected_received(
         self,
-        hash_type: int,
+        packet: memoryview,
+        hash_type: HashProtocol,
         nonce: bytes,
         cert_hash: bytes,
         mac_hash: bytes,
@@ -476,105 +444,53 @@ class SSTPProtocol(Protocol):
             self.abort(ATTRIB_STATUS_UNACCEPTED_FRAME_RECEIVED)
             return
 
-        self.logger.debug(
-            "Received Cert %s: %s",
-            ("SHA1", "SHA256")[hash_type == CERT_HASH_PROTOCOL_SHA256],
-            hexlify(cert_hash).decode(),
-        )
-        self.logger.debug("Received CMAC: %s", hexlify(mac_hash).decode())
-
+        # 1) Check nonce
         if nonce != self.nonce:
-            self.logger.error("Received wrong nonce.")
+            self.logger.warning("abort: wrong nonce received")
             self.abort(ATTRIB_STATUS_INVALID_FRAME_RECEIVED)
             return
 
+        # 2) Check certificate hash
+        self.logger.debug(
+            "Received cert hash %s: %s",
+            hash_type,
+            hexlify(cert_hash).decode(),
+        )
         if (
             self.factory.cert_hash is not None
             and cert_hash not in self.factory.cert_hash
         ):
-            self.logger.error(
-                "Certificate hash mismatch between server's "
-                "and client's. Reject this connection."
-            )
+            self.logger.warning("abort: certificate hash mismatched")
             self.abort(ATTRIB_STATUS_INVALID_FRAME_RECEIVED)
             return
 
-        if not self.should_verify_crypto_binding():
-            self.logger.debug("No crypto binding needed.")
-            self.state = State.SERVER_CALL_CONNECTED
-            self.logger.info("Connection established.")
-            return
+        # 3) Check crypto binding
+        self.logger.debug("Received CMAC: %s", hexlify(mac_hash).decode())
+        assert self.pppd is not None
+        if self.pppd.plugin.loaded:
+            cmk = self.pppd.plugin.cmk.get(hash_type.name)
+            if cmk is None:
+                self.logger.warning("abort: cmk not received from pppd")
+                self.abort(ATTRIB_STATUS_INVALID_FRAME_RECEIVED)
+                return
+            # CMAC: HMAC(key=CMK, data=packet*)
+            # *cmac & padding zeroed out
+            cmac = hmac.new(cmk, digestmod=hash_type.hasher)
+            cmac.update(packet[:16])  # all headers
+            cmac.update(nonce)
+            cmac.update(cert_hash)
+            cmac.update(bytes(32 - len(cert_hash)))  # padding
+            cmac.update(bytes(32))  # cmac
 
-        if self.hlak is None:
-            self.logger.warning(
-                "Waiting for the Higher Layer Authentication "
-                "Key (HLAK) to verify Crypto Binding."
-            )
-            self.client_cmac = mac_hash
-            return
+            self.logger.debug("CMAC: %s", cmac.hexdigest())
 
-        self.sstp_call_connected_crypto_binding(mac_hash)
+            if not hmac.compare_digest(cmac.digest(), mac_hash):
+                self.logger.error("Crypto Binding is invalid.")
+                self.abort(ATTRIB_STATUS_INVALID_FRAME_RECEIVED)
+                return
+        else:
+            self.logger.warning("pppd plugin not loaded, crypto binding was skipped")
 
-    def sstp_call_connected_crypto_binding(self, mac_hash: bytes) -> None:
-        # [MS-SSTP] 3.2.5.{2,4} - If the higher-layer PPP authentication method
-        # did not generate any keys, or if PPP authentication is bypassed, then
-        # the HLAK MUST be 32 octets of 0x00
-        hlak = self.hlak or bytes(32)
-
-        hash_type = (
-            CERT_HASH_PROTOCOL_SHA256
-            if len(mac_hash) == 32
-            else CERT_HASH_PROTOCOL_SHA1
-        )
-
-        # reconstruct Call Connect message with zeroed CMAC field
-        cc_msg = bytes((0x10, 0x01, 0x00, 0x70))
-        cc_msg += MsgType.CALL_CONNECTED.value
-        # number of attributes + reserved
-        cc_msg += bytes((0x00, 0x01, 0x00))
-        cc_msg += SSTP_ATTRIB_CRYPTO_BINDING
-        # attr length + reserved
-        cc_msg += bytes((0x00, 0x68, 0x00, 0x00, 0x00))
-        cc_msg += bytes([hash_type])
-        if self.nonce:
-            cc_msg += self.nonce
-        if self.factory.cert_hash:
-            cc_msg += self.factory.cert_hash[hash_type == CERT_HASH_PROTOCOL_SHA256]
-        # [padding + ] zeroed cmac [+ padding]
-        cc_msg += bytes(0x70 - len(cc_msg))
-
-        # Compound MAC Key (CMK) seed
-        cmk_seed = b"SSTP inner method derived CMK"
-        cmk_digest = (hashlib.sha1, hashlib.sha256)[
-            hash_type == CERT_HASH_PROTOCOL_SHA256
-        ]
-
-        # T1 = HMAC(HLAK, S | LEN | 0x01)
-        t1 = hmac.new(hlak, digestmod=cmk_digest)
-
-        # CMK len (length of digest) - 16-bits little endian
-        cmk_len = bytes((t1.digest_size, 0))
-
-        t1.update(cmk_seed)
-        t1.update(cmk_len)
-        t1.update(b"\x01")
-
-        cmk = t1.digest()
-
-        # CMAC = HMAC(CMK, CC_MSG)
-        cmac = hmac.new(cmk, digestmod=cmk_digest)
-        cmac.update(cc_msg)
-
-        if __debug__:
-            self.logger.debug("Crypto Binding CMK: %s", t1.hexdigest())
-            self.logger.debug("Crypto Binding CMAC: %s", cmac.hexdigest())
-
-        if not hmac.compare_digest(cmac.digest(), mac_hash):
-            self.logger.error("Crypto Binding is invalid.")
-            self.abort(ATTRIB_STATUS_INVALID_FRAME_RECEIVED)
-            return
-
-        self.logger.info("Crypto Binding is valid.")
         self.state = State.SERVER_CALL_CONNECTED
         self.logger.info("Connection established.")
 
@@ -724,27 +640,6 @@ class SSTPProtocol(Protocol):
         self.state = State.CALL_DISCONNECT_ACK_PENDING
         self.loop.call_later(3, self.close_transport)
 
-    def higher_layer_authentication_key_received(
-        self, send_key: bytes, recv_key: bytes
-    ) -> None:
-        # [MS-SSTP] 3.2.5.2 - crypto binding - server mode
-        hlak = recv_key + send_key
-        # ensure hlak is 32 bytes long
-        if len(hlak) < 32:
-            hlak += bytes(32 - len(hlak))
-        self.hlak = hlak[0:32]
-
-        self.logger.info("Received Higher Layer Authentication Key.")
-        self.logger.debug("Configured HLAK as %s", self.hlak.hex())
-
-        self.close_ppp_sstp_api()
-
-        if self.client_cmac is not None:
-            self.sstp_call_connected_crypto_binding(self.client_cmac)
-
-    def should_verify_crypto_binding(self) -> bool:
-        return self.factory.pppd_sstp_api_plugin is not None
-
 
 class SSTPProtocolFactory:
     protocol = SSTPProtocol
@@ -757,18 +652,6 @@ class SSTPProtocolFactory:
     ) -> None:
         self.pppd = config.pppd
         self.pppd_config_file = config.pppd_config
-
-        # detect ppp_sstp_api_plugin
-        ppp_sstp_api_plugin = "sstp-pppd-plugin.so"
-        has_plugin = subprocess.run(
-            [self.pppd, "plugin", ppp_sstp_api_plugin, "notty", "dryrun"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        self.pppd_sstp_api_plugin: str | None = (None, ppp_sstp_api_plugin)[
-            has_plugin.returncode == 0
-        ]
-
         self.local = config.local
         self.proxy_protocol = config.proxy_protocol
         self.use_http_proxy = config.no_ssl and not config.proxy_protocol

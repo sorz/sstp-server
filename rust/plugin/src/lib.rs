@@ -12,7 +12,6 @@
 mod sys;
 
 use anyhow::{Context, bail};
-use digest::Digest;
 use hmac::{Hmac, Mac};
 use sha1::Sha1;
 use sha2::Sha256;
@@ -41,6 +40,7 @@ pub extern "C" fn plugin_init() {
             ptr::null_mut(),
         );
     }
+    eprintln!("SSTP:LOADED:{}", env!("CARGO_PKG_VERSION"));
 }
 
 /// Callback by pppd when authentication is done
@@ -52,8 +52,8 @@ unsafe extern "C" fn notify_auth_up(_ctx: *mut c_void, _arg: c_int) {
             return;
         }
     };
-    eprintln!("SSTP:CMK:SHA-256:{}", HexDisplay(&cmk.sha256));
-    eprintln!("SSTP:CMK:SHA-1:{}", HexDisplay(&cmk.sha1));
+    eprintln!("SSTP:CMK:SHA256:{}", HexDisplay(&cmk.sha256));
+    eprintln!("SSTP:CMK:SHA1:{}", HexDisplay(&cmk.sha1));
 }
 
 fn extract_cmk() -> anyhow::Result<CompoundMacKey> {
@@ -98,25 +98,27 @@ impl MppeKeys {
     fn generate_cmk(&self) -> anyhow::Result<CompoundMacKey> {
         // Higher-Layer Authentication Key (HLAK)
         // SSTP Server HLAK = MasterReceiveKey | MasterSendKe
+        // Truncate/pad to 32 bytes
         let mut hlak = [0u8; 32];
+        let full_len = cmp::min(hlak.len(), self.recv_key.len() + self.send_key.len());
         let recv_len = cmp::min(hlak.len(), self.recv_key.len());
-        let send_len = hlak.len().saturating_sub(recv_len);
+        let send_len = full_len.saturating_sub(recv_len);
         hlak[..recv_len].copy_from_slice(&self.recv_key[..recv_len]);
-        hlak[recv_len..].copy_from_slice(&self.send_key[..send_len]);
+        hlak[recv_len..full_len].copy_from_slice(&self.send_key[..send_len]);
 
         // HMAC-SHA1 (key, seed | output length | 0x01)
         let cmk_sha1 = Hmac::<Sha1>::new_from_slice(&hlak)?
             .chain_update(CMAC_SEED.as_bytes())
-            .chain_update(Sha1::output_size().to_le_bytes())
-            .chain_update([0x01])
+            .chain_update(20u16.to_le_bytes())
+            .chain_update([1])
             .finalize()
             .into_bytes();
 
         // HMAC-SHA256 (key, seed | output length | 0x01)
         let cmk_sha256 = Hmac::<Sha256>::new_from_slice(&hlak)?
             .chain_update(CMAC_SEED.as_bytes())
-            .chain_update(Sha256::output_size().to_le_bytes())
-            .chain_update([0x01])
+            .chain_update(32u16.to_le_bytes())
+            .chain_update([1])
             .finalize()
             .into_bytes();
 

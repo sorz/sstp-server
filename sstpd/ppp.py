@@ -3,10 +3,16 @@ import logging
 import os
 from io import FileIO
 from logging import Logger
+from typing import TypedDict
 
 from .codec import PppDecoder, escape
 from .constants import VERBOSE
 from .utils import hexdump
+
+
+class CompoundMacKey(TypedDict, total=False):
+    sha1: bytes
+    sha256: bytes
 
 
 def is_ppp_control_frame(frame: memoryview | bytearray) -> bool:
@@ -61,6 +67,7 @@ class PPPDProtocol(asyncio.SubprocessProtocol):
         self.write_transport: asyncio.WriteTransport | None = None
         self.read_transport: asyncio.ReadTransport | None = None
         self.pty_file: FileIO | None = None
+        self.plugin = Plugin(self)
 
     def write_frame(self, frame: bytes) -> None:
         if self.write_transport:
@@ -84,7 +91,14 @@ class PPPDProtocol(asyncio.SubprocessProtocol):
                 self.transport.kill()
 
     def pipe_data_received(self, fd: int, data: bytes) -> None:
-        self.logger.info("pppd says (%s) %s", fd, data)
+        # By default, pppd print log to stdout
+        # So we choose stderr to communicate with our plugin
+        match fd:
+            case 1:  # stdout
+                self.logger.info("pppd (stdout): %s", data.decode(errors="replace"))
+            case 2:  # stderr
+                self.logger.debug("pppd (stderr): %s", data.decode(errors="replace"))
+                self.plugin.out_received(data)
 
     def out_received(self, data: bytes) -> None:
         if self.logger.isEnabledFor(VERBOSE):
@@ -149,3 +163,51 @@ class PPPDProtocolFactory:
         return PPPDProtocol(
             self.logger, self.sstp, self.remote, self.master_fd, self.slave_fd
         )
+
+
+class Plugin:
+    def __init__(self, pppd: "PPPDProtocol") -> None:
+        self.pppd = pppd
+        self.buffer = bytearray()
+        self.loaded = False
+        self.has_error = False
+        self.cmk = CompoundMacKey()
+
+    def out_received(self, data: bytes) -> None:
+        self.buffer.extend(data)
+        while True:
+            pos = self.buffer.find(b"\n")
+            if pos == -1:
+                if len(self.buffer) > 2000:
+                    self.buffer.clear()
+                break
+            line = self.buffer[:pos]
+            self.buffer = self.buffer[pos + 1 :]
+            if line.startswith(b"SSTP:"):
+                try:
+                    self.line_received(line.decode())
+                except UnicodeDecodeError:
+                    self.pppd.logger.warning("Failed to decode line")
+
+    def line_received(self, line: str) -> None:
+        try:
+            _, cmd, value = line.split(":", 2)
+        except ValueError:
+            self.pppd.logger.warning("Failed to decode plugin cmd: %s", line)
+            return
+        match cmd:
+            case "LOADED":
+                self.pppd.logger.info("pppd plugin loaded: %s", value)
+                self.loaded = True
+            case "ERROR":
+                self.error = True
+                self.pppd.logger.warning("Plugin error: %s", value)
+            case "INFO":
+                self.pppd.logger.info("Plugin: %s", value)
+            case "CMK":
+                try:
+                    algo, hex = value.split(":", 1)
+                    self.cmk[algo] = bytes.fromhex(hex)
+                except ValueError:
+                    self.error = True
+                    self.pppd.logger.warning("Plugin sent invalid key")
