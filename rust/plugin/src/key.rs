@@ -31,6 +31,18 @@ struct MppeKeys {
     send_key: Vec<u8>,
 }
 
+// HMAC (key, seed | output length (u16 le) | 0x01)
+macro_rules! get_cmk {
+    ($hash:ident, $size:expr, $hlak:expr) => {
+        Hmac::<$hash>::new_from_slice($hlak)?
+            .chain_update(CMAC_SEED.as_bytes())
+            .chain_update($size.to_le_bytes())
+            .chain_update([1])
+            .finalize()
+            .into_bytes()
+    };
+}
+
 impl MppeKeys {
     fn try_get() -> anyhow::Result<Self> {
         Ok(Self {
@@ -49,22 +61,8 @@ impl MppeKeys {
         hlak[..recv_len].copy_from_slice(&self.recv_key[..recv_len]);
         hlak[recv_len..full_len].copy_from_slice(&self.send_key[..send_len]);
 
-        // HMAC-SHA1 (key, seed | output length | 0x01)
-        let cmk_sha1 = Hmac::<Sha1>::new_from_slice(&hlak)?
-            .chain_update(CMAC_SEED.as_bytes())
-            .chain_update(20u16.to_le_bytes())
-            .chain_update([1])
-            .finalize()
-            .into_bytes();
-
-        // HMAC-SHA256 (key, seed | output length | 0x01)
-        let cmk_sha256 = Hmac::<Sha256>::new_from_slice(&hlak)?
-            .chain_update(CMAC_SEED.as_bytes())
-            .chain_update(32u16.to_le_bytes())
-            .chain_update([1])
-            .finalize()
-            .into_bytes();
-
+        let cmk_sha1 = get_cmk!(Sha1, 20u16, &hlak);
+        let cmk_sha256 = get_cmk!(Sha256, 32u16, &hlak);
         hlak.zeroize();
         Ok(CompoundMacKey {
             sha1: cmk_sha1.into(),
