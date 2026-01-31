@@ -13,6 +13,7 @@ hmac = "0.12"
 sha1 = "0.10"
 sha2 = "0.10"
 anyhow = "1"
+nix = { version = "0.31", features = ["ioctl"] }
 
 [build-dependencies]
 bindgen = "0.71"
