@@ -6,7 +6,6 @@ import os
 import pty
 import struct
 import subprocess
-import tempfile
 import tty
 from asyncio import Protocol, Server, SubprocessTransport, Task, Transport
 from binascii import hexlify
@@ -17,6 +16,7 @@ from typing import Any
 
 from . import __version__
 from .address import IPPool
+from .certtool import Fingerprint
 from .constants import (
     ATTRIB_STATUS_INVALID_FRAME_RECEIVED,
     ATTRIB_STATUS_NEGOTIATION_TIMEOUT,
@@ -39,7 +39,6 @@ from .packets import SSTPControlPacket, SSTPDataPacket
 from .ppp import (
     PPPDProtocol,
     PPPDProtocolFactory,
-    PPPDSSTPPluginFactory,
     is_ppp_control_frame,
 )
 from .proxy_protocol import PPException, PPNoEnoughData, parse_pp_header
@@ -71,7 +70,8 @@ class State(Enum):
 
 
 class SSTPProtocol(Protocol):
-    def __init__(self) -> None:
+    def __init__(self, factory: "SSTPProtocolFactory") -> None:
+        self.factory = factory
         self.logger = logger
         self.loop = asyncio.get_event_loop()
         self.state = State.SERVER_CALL_DISCONNECTED
@@ -93,10 +93,9 @@ class SSTPProtocol(Protocol):
         # Client Compound MAC
         self.client_cmac: bytes | None = None
         self.transport: Transport | None = None
-        self.factory: "SSTPProtocolFactory"  # type: ignore
 
     def update_logger(self) -> None:
-        self.logger = SSTPLogger(
+        self.logger = SessionLogger(
             self.logger,
             self.correlation_id or "?",
             self.remote_host,
@@ -258,7 +257,7 @@ class SSTPProtocol(Protocol):
             self.sstp_control_packet_received(msg_type, attributes)
 
     def sstp_data_packet_received(self, data: bytes) -> None:
-        if __debug__:
+        if self.logger.isEnabledFor(logging.DEBUG):
             self.logger.debug("sstp => pppd (%s bytes).", len(data))
             self.logger.log(VERBOSE, hexdump(data))
         if self.pppd is None:
@@ -399,22 +398,8 @@ class SSTPProtocol(Protocol):
             "nodetach",
         ]
         if self.factory.pppd_sstp_api_plugin is not None:
-            # create a unique socket filename
-            ppp_sock = tempfile.NamedTemporaryFile(
-                prefix="ppp-sstp-api-", suffix=".sock"
-            )
-            args += [
-                "plugin",
-                self.factory.pppd_sstp_api_plugin,
-                "sstp-sock",
-                ppp_sock.name,
-            ]
-            ppp_event = self.loop.create_unix_server(
-                PPPDSSTPPluginFactory(callback=self), path=ppp_sock.name
-            )
-            ppp_sock.close()
-            task = asyncio.create_task(ppp_event)
-            task.add_done_callback(self.ppp_sstp_api)
+            # TODO: add plugin to args
+            pass
 
         if self.remote_host is not None:
             args += ["remotenumber", self.remote_host]
@@ -427,9 +412,7 @@ class SSTPProtocol(Protocol):
         if self.remote_port is not None:
             ppp_env["SSTP_REMOTE_PORT"] = str(self.remote_port)
 
-        factory = PPPDProtocolFactory(
-            callback=self, remote=remote, master_fd=master_fd, slave_fd=slave_fd
-        )
+        factory = PPPDProtocolFactory(self, remote, master_fd, slave_fd)
         coro = self.loop.subprocess_exec(factory, self.factory.pppd, *args, env=ppp_env)
         task = asyncio.ensure_future(coro)
         task.add_done_callback(self.pppd_started)
@@ -718,7 +701,7 @@ class SSTPProtocol(Protocol):
         elif self.state != State.SERVER_CALL_CONNECTED:
             return
         for frame in frames:
-            if __debug__:
+            if self.logger.isEnabledFor(logging.DEBUG):
                 self.logger.debug("pppd => sstp (%d bytes)", len(frame))
                 self.logger.log(VERBOSE, hexdump(bytes(frame)))
             if self.transport:
@@ -767,10 +750,14 @@ class SSTPProtocolFactory:
     protocol = SSTPProtocol
 
     def __init__(
-        self, config: Any, remote_pool: IPPool | None, cert_hash: Any | None = None
+        self,
+        config: Any,
+        remote_pool: IPPool | None,
+        cert_hash: Fingerprint | None = None,
     ) -> None:
         self.pppd = config.pppd
         self.pppd_config_file = config.pppd_config
+
         # detect ppp_sstp_api_plugin
         ppp_sstp_api_plugin = "sstp-pppd-plugin.so"
         has_plugin = subprocess.run(
@@ -781,20 +768,19 @@ class SSTPProtocolFactory:
         self.pppd_sstp_api_plugin: str | None = (None, ppp_sstp_api_plugin)[
             has_plugin.returncode == 0
         ]
+
         self.local = config.local
         self.proxy_protocol = config.proxy_protocol
         self.use_http_proxy = config.no_ssl and not config.proxy_protocol
         self.remote_pool = remote_pool
         self.cert_hash = cert_hash
-        self.logger = logging.getLogger("SSTP")
+        self.logger = logger
 
     def __call__(self) -> SSTPProtocol:
-        proto = self.protocol()
-        proto.factory = self
-        return proto
+        return self.protocol(self)
 
 
-class SSTPLogger(logging.LoggerAdapter):
+class SessionLogger(logging.LoggerAdapter):
     def __init__(self, logger, id: str, host: str | None, port: int | None) -> None:
         if host and port:
             if ":" in host:
