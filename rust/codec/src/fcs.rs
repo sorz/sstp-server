@@ -48,24 +48,33 @@ impl Fcs {
     }
 
     pub(crate) fn update(&mut self, bytes: &[u8]) {
+        let mut chunks = bytes.chunks_exact(8);
+        for chunk in chunks.by_ref() {
+            self.update_slice(chunk);
+        }
+        self.update_lut(chunks.remainder());
+    }
+
+    /// Slice-by-8 FCS, `data` must be 8 bytes
+    #[inline]
+    fn update_slice(&mut self, data: &[u8]) {
+        let idx0 = self.value as u8 ^ data[0];
+        let idx1 = (self.value >> 8) as u8 ^ data[1];
+        self.value = FCSTAB[7][idx0 as usize]
+            ^ FCSTAB[6][idx1 as usize]
+            ^ FCSTAB[5][data[2] as usize]
+            ^ FCSTAB[4][data[3] as usize]
+            ^ FCSTAB[3][data[4] as usize]
+            ^ FCSTAB[2][data[5] as usize]
+            ^ FCSTAB[1][data[6] as usize]
+            ^ FCSTAB[0][data[7] as usize];
+    }
+
+    fn update_lut(&mut self, bytes: &[u8]) {
         for &byte in bytes {
             let key = ((self.value as u8) ^ byte) as usize;
             self.value = (self.value >> 8) ^ FCSTAB[0][key];
         }
-    }
-
-    #[inline]
-    pub(crate) fn update_u64(&mut self, data: u64) {
-        let idx0 = self.value ^ data as u16;
-        let idx1 = (self.value >> 8) ^ ((data >> 8) as u16);
-        self.value = FCSTAB[7][idx0 as u8 as usize]
-            ^ FCSTAB[6][idx1 as u8 as usize]
-            ^ FCSTAB[5][(data >> 16) as u8 as usize]
-            ^ FCSTAB[4][(data >> 24) as u8 as usize]
-            ^ FCSTAB[3][(data >> 32) as u8 as usize]
-            ^ FCSTAB[2][(data >> 40) as u8 as usize]
-            ^ FCSTAB[1][(data >> 48) as u8 as usize]
-            ^ FCSTAB[0][(data >> 56) as u8 as usize];
     }
 
     pub(crate) fn checksum(&self) -> u16 {
@@ -87,13 +96,8 @@ fn test_fcs_bytes() {
     let mut fcs_slice = Fcs::new();
     let bytes: Vec<u8> = (0..255).chain(0..255).collect();
 
-    fcs_table.update(&bytes);
-    let (prefix, words, suffix) = unsafe { bytes.align_to::<u64>() };
-    fcs_slice.update(prefix);
-    for &word in words {
-        fcs_slice.update_u64(word);
-    }
-    fcs_slice.update(suffix);
+    fcs_table.update_lut(&bytes);
+    fcs_slice.update(&bytes);
 
     assert_eq!(fcs_table.checksum(), fcs_slice.checksum());
 }

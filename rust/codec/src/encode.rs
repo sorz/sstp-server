@@ -58,28 +58,35 @@ macro_rules! escape_to {
 pub(crate) fn encode_frame(full: bool, data: &[u8], buf: &mut [u8]) -> usize {
     let mut fcs = fcs::Fcs::new();
     let mut buf_pos = 0;
-
+    // encode flag
     buf[buf_pos] = FLAG_SEQUENCE;
     buf_pos += 1;
 
-    // Safety: transmutes u8 to u64 is safe
-    let (prefix, words, suffix) = unsafe { data.align_to::<u64>() };
-    // prefix
-    fcs.update(prefix);
-    buf_pos += escape_to!(full, prefix, &mut buf[buf_pos..]);
+    // encode main body
+    let (len, remainder) = encode_scalar(full, &mut fcs, data, &mut buf[buf_pos..]);
+    buf_pos += len;
 
-    // middle - fast slice-by-8 fcs
-    for &word in words {
-        fcs.update_u64(word);
-        buf_pos += escape_to!(full, &word.to_ne_bytes(), &mut buf[buf_pos..]);
-    }
-    // suffix
-    fcs.update(suffix);
-    buf_pos += escape_to!(full, suffix, &mut buf[buf_pos..]);
-
+    // encode remainder
+    fcs.update(remainder);
+    buf_pos += escape_to!(full, remainder, &mut buf[buf_pos..]);
+    // encode fcs and flag
     buf_pos += escape_to!(full, &fcs.checksum().to_le_bytes(), &mut buf[buf_pos..]);
     buf[buf_pos] = FLAG_SEQUENCE;
     buf_pos += 1;
-
     buf_pos
+}
+
+fn encode_scalar<'a>(
+    full: bool,
+    fcs: &mut fcs::Fcs,
+    raw: &'a [u8],
+    out: &mut [u8],
+) -> (usize, &'a [u8]) {
+    let mut chunks = raw.chunks_exact(8);
+    let mut pos = 0;
+    for chunk in chunks.by_ref() {
+        fcs.update(chunk);
+        pos += escape_to!(full, chunk, &mut out[pos..]);
+    }
+    (pos, chunks.remainder())
 }
