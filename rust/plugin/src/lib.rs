@@ -10,13 +10,13 @@
 //! - does not implement compat functions for older version of pppd.
 //! - uses pppd's stderr instead of dedicated unix domain socket.
 mod hack;
-mod sys;
 mod key;
+mod sys;
 
 use std::{
+    fmt,
     os::raw::{c_int, c_void},
     ptr,
-    fmt,
 };
 
 /// pppd will check its version number with it,

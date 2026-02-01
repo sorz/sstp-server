@@ -1,4 +1,4 @@
-use crate::{fcs, FLAG_SEQUENCE, CONTROL_ESCAPE, ESCAPE_MASK};
+use crate::{CONTROL_ESCAPE, ESCAPE_MASK, FLAG_SEQUENCE, fcs};
 
 // FLAG_SEQUENCE, CONTROL_ESCAPE, and any < ESCAPE_MASK
 const ESACPE_MAP_FULL: [bool; 256] = {
@@ -33,7 +33,7 @@ fn full_escape_to(bytes: &[u8], out: &mut [u8]) -> usize {
 fn escape_to(bytes: &[u8], out: &mut [u8]) -> usize {
     let mut pos = 0;
     for &byte in bytes {
-        if byte == CONTROL_ESCAPE || byte == FLAG_SEQUENCE  {
+        if byte == CONTROL_ESCAPE || byte == FLAG_SEQUENCE {
             out[pos] = CONTROL_ESCAPE;
             out[pos + 1] = byte ^ ESCAPE_MASK;
             pos += 2;

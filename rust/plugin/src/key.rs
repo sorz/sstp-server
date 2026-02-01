@@ -9,7 +9,6 @@ use crate::sys;
 
 const CMAC_SEED: &str = "SSTP inner method derived CMK";
 
-
 pub(crate) fn extract_cmk() -> anyhow::Result<CompoundMacKey> {
     let mppe_key = if !unsafe { sys::mppe_keys_isset() } {
         eprintln!("SSTP:INFO:mppe keys is unset");
