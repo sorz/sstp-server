@@ -6,8 +6,8 @@ use core::arch::x86_64::{
     _mm512_mask_compressstoreu_epi8, _mm512_or_si512, _mm512_set1_epi8, _mm512_set1_epi16,
     _mm512_xor_si512,
 };
+use crc_fast::CrcAlgorithm;
 
-use super::fcs::Fcs;
 use crate::{CONTROL_ESCAPE, ESCAPE_MASK, FLAG_SEQUENCE};
 
 // FLAG_SEQUENCE, CONTROL_ESCAPE, and any < ESCAPE_MASK
@@ -65,55 +65,63 @@ macro_rules! escape_to {
     };
 }
 
+/// Escape data, calculate fcs, add flag sequances around
+/// Return encoded frame length
 pub(crate) fn encode_frame(full: bool, data: &[u8], buf: &mut [u8]) -> usize {
-    let mut fcs = Fcs::new();
     let mut buf_pos = 0;
     // encode flag
     buf[buf_pos] = FLAG_SEQUENCE;
     buf_pos += 1;
 
     // encode main body
-    // let (len, remainder) = encode_scalar(full, &mut fcs, data, &mut buf[buf_pos..]);
+    // 640-byte threshold is a guess
     let (len, remainder) = if full || data.len() < 640 {
-        encode_scalar(full, &mut fcs, data, &mut buf[buf_pos..])
+        encode_scalar(full, data, &mut buf[buf_pos..])
     } else {
         #[cfg(avx512)]
         {
-            let (len, rem) = encode_vector(&mut fcs, data, &mut buf[buf_pos..]);
+            let (len, rem) = encode_vector(data, &mut buf[buf_pos..]);
             buf_pos += len;
-            encode_scalar(full, &mut fcs, rem, &mut buf[buf_pos..])
+            encode_scalar(full, rem, &mut buf[buf_pos..])
         }
         #[cfg(not(avx512))]
-        encode_scalar(full, &mut fcs, data, &mut buf[buf_pos..])
+        encode_scalar(full, data, &mut buf[buf_pos..])
     };
     buf_pos += len;
 
     // encode remainder
-    fcs.update(remainder);
     buf_pos += escape_to!(full, remainder, &mut buf[buf_pos..]);
     // encode fcs and flag
-    buf_pos += escape_to!(full, &fcs.checksum().to_le_bytes(), &mut buf[buf_pos..]);
+    let fcs = crc_fast::checksum(CrcAlgorithm::Crc16IbmSdlc, data) as u16;
+    buf_pos += escape_to!(full, &fcs.to_le_bytes(), &mut buf[buf_pos..]);
     buf[buf_pos] = FLAG_SEQUENCE;
     buf_pos += 1;
     buf_pos
 }
 
-fn encode_scalar<'a>(
-    full: bool,
-    fcs: &mut Fcs,
-    raw: &'a [u8],
-    out: &mut [u8],
-) -> (usize, &'a [u8]) {
-    let mut chunks = raw.chunks_exact(8);
+#[inline]
+fn encode_scalar<'a>(full: bool, raw: &'a [u8], out: &mut [u8]) -> (usize, &'a [u8]) {
+    // Not really scalar, let compiler do the vectorization
+    // (~20% improvment on my machine)
+    let mut chunks = raw.chunks_exact(64);
     let mut pos = 0;
-    for chunk in chunks.by_ref() {
-        fcs.update(chunk);
-        pos += escape_to!(full, chunk, &mut out[pos..]);
+    if full {
+        for chunk in chunks.by_ref() {
+            pos += full_escape_to(chunk, &mut out[pos..]);
+        }
+    } else {
+        for chunk in chunks.by_ref() {
+            pos += escape_to(chunk, &mut out[pos..]);
+        }
     }
     (pos, chunks.remainder())
 }
 
 /// Escape frame data with AVX-512 instructions
+///
+/// It escapes flag & ctrl only, not full under-0x20 escaping. Since only
+/// frames before LCP handshake need a full escaping, little benefit to
+/// implement that.
 ///
 /// Similar to https://lemire.me/blog/2022/09/14/escaping-strings-faster-with-avx-512/
 /// Steps:
@@ -135,7 +143,7 @@ fn encode_scalar<'a>(
     target_feature = "avx512vl",
     target_feature = "avx512vbmi2"
 ))]
-pub(crate) fn encode_vector<'a>(fcs: &mut Fcs, raw: &'a [u8], out: &mut [u8]) -> (usize, &'a [u8]) {
+pub(crate) fn encode_vector<'a>(raw: &'a [u8], out: &mut [u8]) -> (usize, &'a [u8]) {
     let mut chunks = raw.chunks_exact(32);
     let mut pos = 0;
 
@@ -148,7 +156,6 @@ pub(crate) fn encode_vector<'a>(fcs: &mut Fcs, raw: &'a [u8], out: &mut [u8]) ->
     let mask_hi = 0xaaaa_aaaa_aaaa_aaaa;
 
     for chunk in chunks.by_ref() {
-        fcs.update(chunk);
         unsafe {
             let input = _mm256_loadu_si256(chunk.as_ptr() as *const __m256i);
             // fast check
