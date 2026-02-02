@@ -1,4 +1,4 @@
-#[cfg(avx512)]
+#[cfg(avx512_encode)]
 use core::arch::x86_64::{
     __m256i, _cvtmask32_u32, _cvtmask64_u64, _kor_mask32, _kor_mask64, _kshiftli_mask64,
     _mm256_cmpeq_epi8_mask, _mm256_loadu_si256, _mm256_set1_epi8, _mm256_storeu_si256,
@@ -78,13 +78,13 @@ pub(crate) fn encode_frame(full: bool, data: &[u8], buf: &mut [u8]) -> usize {
     let (len, remainder) = if full || data.len() < 640 {
         encode_scalar(full, data, &mut buf[buf_pos..])
     } else {
-        #[cfg(avx512)]
+        #[cfg(avx512_encode)]
         {
             let (len, rem) = encode_vector(data, &mut buf[buf_pos..]);
             buf_pos += len;
             encode_scalar(full, rem, &mut buf[buf_pos..])
         }
-        #[cfg(not(avx512))]
+        #[cfg(not(avx512_encode))]
         encode_scalar(full, data, &mut buf[buf_pos..])
     };
     buf_pos += len;
@@ -135,14 +135,7 @@ fn encode_scalar<'a>(full: bool, raw: &'a [u8], out: &mut [u8]) -> (usize, &'a [
 ///    either raw or xor-ed data
 /// 6. put CONTROL_ESCAPE before each data bytes
 /// 7. write out bytes, use the mask to skip unwanted control bytes
-#[cfg(all(
-    target_arch = "x86_64",
-    target_feature = "avx",
-    target_feature = "avx512f",
-    target_feature = "avx512bw",
-    target_feature = "avx512vl",
-    target_feature = "avx512vbmi2"
-))]
+#[cfg(avx512_encode)]
 pub(crate) fn encode_vector<'a>(raw: &'a [u8], out: &mut [u8]) -> (usize, &'a [u8]) {
     let mut chunks = raw.chunks_exact(32);
     let mut pos = 0;
