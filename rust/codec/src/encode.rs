@@ -63,7 +63,14 @@ pub(crate) fn encode_frame(full: bool, data: &[u8], buf: &mut [u8]) -> usize {
     buf_pos += 1;
 
     // encode main body
-    let (len, remainder) = encode_scalar(full, &mut fcs, data, &mut buf[buf_pos..]);
+    // let (len, remainder) = encode_scalar(full, &mut fcs, data, &mut buf[buf_pos..]);
+    let (len, remainder) = if full || data.len() < 640 {
+        encode_scalar(full, &mut fcs, data, &mut buf[buf_pos..])
+    } else {
+        let (len, rem) = avx512::encode(&mut fcs, data, &mut buf[buf_pos..]);
+        buf_pos += len;
+        encode_scalar(full, &mut fcs, rem, &mut buf[buf_pos..])
+    };
     buf_pos += len;
 
     // encode remainder
@@ -89,4 +96,73 @@ fn encode_scalar<'a>(
         pos += escape_to!(full, chunk, &mut out[pos..]);
     }
     (pos, chunks.remainder())
+}
+
+#[cfg(target_arch = "x86_64")]
+mod avx512 {
+    use core::arch::x86_64::{
+        __m256i, _cvtmask64_u64, _kor_mask64, _mm256_loadu_si256, _mm512_bslli_epi128,
+        _mm512_cmpeq_epi8_mask, _mm512_cvtepu8_epi16, _mm512_mask_blend_epi8,
+        _mm512_mask_compressstoreu_epi8, _mm512_or_si512, _mm512_set1_epi8, _mm512_set1_epi16,
+        _mm512_xor_si512, _kshiftli_mask64, _mm256_storeu_si256, _mm256_set1_epi8, _mm256_cmpeq_epi8_mask,
+        _kor_mask32, _cvtmask32_u32
+    };
+
+    use crate::{CONTROL_ESCAPE, ESCAPE_MASK, FLAG_SEQUENCE, fcs::Fcs};
+
+    pub(crate) fn encode<'a>(fcs: &mut Fcs, raw: &'a [u8], out: &mut [u8]) -> (usize, &'a [u8]) {
+        let mut chunks = raw.chunks_exact(32);
+        let mut pos = 0;
+
+        let flag_32 = unsafe { _mm256_set1_epi8(FLAG_SEQUENCE as i8) };
+        let ctrl_32 = unsafe { _mm256_set1_epi8(CONTROL_ESCAPE as i8) };
+
+        let flag = unsafe { _mm512_set1_epi8(FLAG_SEQUENCE as i8) };
+        let ctrl_lo = unsafe { _mm512_set1_epi16(i16::from_le_bytes([CONTROL_ESCAPE, 0x00])) };
+        let esc_hi = unsafe { _mm512_set1_epi16(i16::from_le_bytes([0x00, ESCAPE_MASK])) };
+        let mask_hi = 0xaaaa_aaaa_aaaa_aaaa;
+
+        for chunk in chunks.by_ref() {
+            fcs.update(chunk);
+            unsafe {
+                let input = _mm256_loadu_si256(chunk.as_ptr() as *const __m256i);
+                // fast check
+                let bypass = {
+                    let is_flag = _mm256_cmpeq_epi8_mask(input, flag_32);
+                    let is_ctrl = _mm256_cmpeq_epi8_mask(input, ctrl_32);
+                    let mask = _kor_mask32(is_flag, is_ctrl);
+                    _cvtmask32_u32(mask) == 0
+                };
+                if bypass {
+                    _mm256_storeu_si256(out[pos..].as_mut_ptr() as *mut __m256i, input);
+                    pos += 32;
+                    continue;
+                }
+                // pad 0x00 after each of input byte
+                let input_lo = _mm512_cvtepu8_epi16(input);
+                // check flag & esc
+                let is_special_lo = {
+                    let is_flag = _mm512_cmpeq_epi8_mask(input_lo, flag);
+                    let is_esc = _mm512_cmpeq_epi8_mask(input_lo, ctrl_lo);
+                    _kor_mask64(is_flag, is_esc)
+                };
+                // escape input data with xor
+                let input_hi = {
+                    let input_hi = _mm512_bslli_epi128(input_lo, 1);
+                    let input_esc_hi = _mm512_xor_si512(input_hi, esc_hi);
+                    let is_special_hi = _kshiftli_mask64(is_special_lo, 1);
+                    _mm512_mask_blend_epi8(is_special_hi, input_hi, input_esc_hi)
+                };
+                // combine data & escape
+                let output = _mm512_or_si512(input_hi, ctrl_lo);
+                // write out data & required escape
+                let keep = _kor_mask64(is_special_lo, mask_hi);
+                _mm512_mask_compressstoreu_epi8(out[pos..].as_mut_ptr() as *mut i8, keep, output);
+                pos += _cvtmask64_u64(keep).count_ones() as usize;
+                // println!("pos + {} = {}", _cvtmask64_u64(keep).count_ones(), pos);
+            }
+        }
+        (pos, chunks.remainder())
+    }
+
 }
