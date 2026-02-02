@@ -3,7 +3,6 @@ use pyo3::types::{PyByteArray, PyBytes, PyMemoryView, PySlice};
 
 mod decode;
 mod encode;
-mod fcs;
 
 const FLAG_SEQUENCE: u8 = 0x7e;
 const CONTROL_ESCAPE: u8 = 0x7d;

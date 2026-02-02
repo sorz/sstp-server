@@ -421,6 +421,7 @@ name = "sstp-codec"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "cfg_aliases",
  "pyo3",
 ]
 
