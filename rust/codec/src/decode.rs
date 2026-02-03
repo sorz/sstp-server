@@ -1,9 +1,9 @@
 #[cfg(avx512_decode)]
 use core::arch::x86_64::{
-     _mm512_cmpeq_epi8_mask, _mm512_mask_blend_epi8,
-    _mm512_mask_compressstoreu_epi8, _mm512_set1_epi8,
-    _mm512_xor_si512, _mm512_loadu_epi8
+    _mm512_cmpeq_epi8_mask, _mm512_loadu_epi8, _mm512_mask_blend_epi8,
+    _mm512_mask_compressstoreu_epi8, _mm512_set1_epi8, _mm512_xor_si512,
 };
+use smallvec::SmallVec;
 
 use crate::{CONTROL_ESCAPE, ESCAPE_MASK, FLAG_SEQUENCE};
 
@@ -21,19 +21,28 @@ impl PartialFrame {
 
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct Frame {
-    pub(crate) start: usize,
-    pub(crate) len: usize,
+    start: u16,
+    len: u16,
 }
 
 impl Frame {
     #[inline]
-    fn adv(&mut self, n: usize) {
-        self.len += n;
+    fn adv(&mut self, n: u16) {
+        self.len = self.len.saturating_add(n);
+    }
+
+    #[inline]
+    pub(crate) fn start(&self) -> usize {
+        self.start as usize
     }
 
     #[inline]
     pub(crate) fn end(&self) -> usize {
-        self.start + self.len
+        (self.start + self.len) as usize
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.len as usize
     }
 
     #[inline]
@@ -53,6 +62,8 @@ impl Frame {
     }
 }
 
+type FrameVec = SmallVec<[Frame; 10]>;
+
 /// Unescape all `raw` frames into `out` buffer
 /// Put (start index, length) of each frame to `frames` vec
 /// Update `partial` with remaining frame data
@@ -60,12 +71,12 @@ pub(crate) fn decode_frames(
     partial: &mut PartialFrame,
     input: &[u8],
     out: &mut [u8],
-    frames: &mut Vec<Frame>,
+    frames: &mut FrameVec,
 ) {
     let mut frame: Frame = Default::default();
     // fill with incomplete frame from the last call
     out[..partial.len()].copy_from_slice(&partial.frame);
-    frame.adv(partial.len());
+    frame.adv(partial.len() as u16);
 
     let escaped = if input.len() < 640 {
         decode_scalar(input, out, partial.escaped, &mut frame, frames)
@@ -84,10 +95,16 @@ pub(crate) fn decode_frames(
     partial.frame.clear();
     partial
         .frame
-        .extend_from_slice(&out[frame.start..frame.end()]);
+        .extend_from_slice(&out[frame.start()..frame.end()]);
 }
 
-fn decode_scalar(input: &[u8], out: &mut [u8], esc_first: bool, frame: &mut Frame, frames: &mut Vec<Frame>) -> bool {
+fn decode_scalar(
+    input: &[u8],
+    out: &mut [u8],
+    esc_first: bool,
+    frame: &mut Frame,
+    frames: &mut FrameVec,
+) -> bool {
     let mut mask = if esc_first { ESCAPE_MASK } else { 0 };
     for &byte in input {
         match byte {
@@ -118,7 +135,7 @@ fn decode_vector<'a>(
     out: &mut [u8],
     esc_first: bool,
     frame: &mut Frame,
-    frames: &mut Vec<Frame>
+    frames: &mut FrameVec,
 ) -> (bool, &'a [u8]) {
     let flag = unsafe { _mm512_set1_epi8(FLAG_SEQUENCE as i8) };
     let ctrl = unsafe { _mm512_set1_epi8(CONTROL_ESCAPE as i8) };
@@ -141,21 +158,22 @@ fn decode_vector<'a>(
                 _mm512_mask_blend_epi8(mask, input, unescaped)
             };
             // write out frame data
-            let mask_keep = !(mask_flag|mask_ctrl);
+            let mask_keep = !(mask_flag | mask_ctrl);
             _mm512_mask_compressstoreu_epi8(
                 out[frame.end()..].as_mut_ptr() as *mut i8,
                 mask_keep,
-                input
+                input,
             );
             (mask_keep, mask_flag)
         };
-        if flag == 0 { // fast path
-            frame.adv(keep.count_ones() as usize);
+        if flag == 0 {
+            // fast path
+            frame.adv(keep.count_ones() as u16);
         } else {
             while keep > 0 {
                 let n = flag.trailing_zeros();
                 let len = (keep.unbounded_shl(64 - n)).count_ones();
-                frame.adv(len as usize);
+                frame.adv(len as u16);
                 if flag > 0 {
                     if frame.len < 4 {
                         frame.next();

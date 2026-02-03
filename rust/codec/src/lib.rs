@@ -3,6 +3,7 @@ mod encode;
 
 use pyo3::prelude::*;
 use pyo3::types::{PyByteArray, PyBytes, PyMemoryView, PySlice};
+use smallvec::SmallVec;
 
 const FLAG_SEQUENCE: u8 = 0x7e;
 const CONTROL_ESCAPE: u8 = 0x7d;
@@ -49,7 +50,7 @@ impl PppDecoder {
     ) -> PyResult<Vec<Bound<'py, PyAny>>> {
         let data = data.as_bytes();
 
-        let mut frames = Vec::new();
+        let mut frames = SmallVec::new();
         let buf = PyByteArray::new_with(py, self.frame.len() + data.len(), |buf| {
             decode::decode_frames(&mut self.frame, data, buf, &mut frames);
             Ok(())
@@ -57,9 +58,9 @@ impl PppDecoder {
 
         match frames.len() {
             0 => Ok(vec![]),
-            1 if frames[0].start == 0 => {
+            1 if frames[0].start() == 0 => {
                 // fast path: return bytearray
-                buf.resize(frames[0].len)?;
+                buf.resize(frames[0].len())?;
                 Ok(vec![buf.into_any()])
             }
             _ => {
@@ -68,7 +69,7 @@ impl PppDecoder {
                 frames
                     .into_iter()
                     .map(|f| {
-                        let slice = PySlice::new(py, f.start as isize, f.end() as isize, 1);
+                        let slice = PySlice::new(py, f.start() as isize, f.end() as isize, 1);
                         buf.get_item(slice)
                     })
                     .collect()
