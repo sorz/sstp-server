@@ -104,9 +104,11 @@ class SSTPProtocol(Protocol):
         )
 
     def connection_made(self, transport: asyncio.BaseTransport) -> None:
-        self.transport = transport  # type: ignore
+        assert isinstance(transport, Transport)
+        self.transport = transport
         self.proxy_protocol_passed = not self.factory.proxy_protocol
         peer = transport.get_extra_info("peername")
+        transport.set_write_buffer_limits(512 * 1024, 128 * 1024)
         if hasattr(peer, "host"):
             self.remote_host = str(peer.host)
             self.remote_port = int(peer.port) if hasattr(peer, "port") else None
@@ -711,6 +713,26 @@ class SSTPProtocol(Protocol):
     def close_transport(self) -> None:
         if self.transport:
             self.transport.close()
+
+    def pause_writing(self) -> None:
+        print("SSTP pause_writing")
+        if self.pppd is not None:
+            self.pppd.pause_producing()
+
+    def resume_writing(self) -> None:
+        print("SSTP resume_writing")
+        if self.pppd is not None:
+            self.pppd.resume_producing()
+
+    def pause_producing(self) -> None:
+        self.logger.debug("Pause sstp producting")
+        if self.transport is not None:
+            self.transport.pause_reading()
+
+    def resume_producing(self) -> None:
+        self.logger.debug("Resume sstp producing")
+        if self.transport is not None:
+            self.transport.resume_reading()
 
     def write_ppp_frames(self, frames: list[bytes]) -> None:
         if self.state == State.SERVER_CALL_CONNECTED_PENDING:
