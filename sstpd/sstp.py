@@ -72,19 +72,17 @@ class SSTPProtocol(Protocol):
         self.logger = logger
         self.loop = asyncio.get_event_loop()
         self.state = State.SERVER_CALL_DISCONNECTED
-        self.sstp_packet_len = 0
         self.receive_buf = bytearray()
         self.nonce: bytes | None = None
         self.pppd: PPPDProtocol | None = None
         self.retry_counter = 0
         self.hello_timer: asyncio.TimerHandle | None = None
         self.reset_hello_timer()
-        self.proxy_protocol_passed = False
+        self.proxy_protocol_passed = not self.factory.proxy_protocol
         self.correlation_id: str | None = None
         self.remote_host: str | None = None
         self.remote_port: int | None = None
         self.transport: Transport | None = None
-        self.proxy_protocol_passed = not self.factory.proxy_protocol
 
     def update_logger(self) -> None:
         self.logger = SessionLogger(
@@ -213,28 +211,31 @@ class SSTPProtocol(Protocol):
 
     def sstp_data_received(self, data: bytes) -> None:
         self.reset_hello_timer()
-        self.receive_buf.extend(data)
-        while len(self.receive_buf) >= 4:
+        if self.receive_buf:
+            self.receive_buf.extend(data)
+            buf = memoryview(self.receive_buf)
+        else:
+            buf = memoryview(data)
+
+        while len(buf) >= 4:
             # Check version.
-            if self.receive_buf[0] != 0x10:
+            if buf[0] != 0x10:
                 self.logger.warning("Unsupported SSTP version.")
                 if self.transport:
                     self.transport.close()
                 return
-            # Get length if necessary.
-            if not self.sstp_packet_len:
-                self.sstp_packet_len = parse_length(self.receive_buf[2:4])
-            if len(self.receive_buf) < self.sstp_packet_len:
-                return
-            packet = memoryview(self.receive_buf)[: self.sstp_packet_len]
-            self.receive_buf = self.receive_buf[self.sstp_packet_len :]
-            self.sstp_packet_len = 0
-            self.sstp_packet_received(packet)
+            pkt_len = parse_length(buf[2:4])
+            if len(buf) < pkt_len:
+                break
+            pkt, buf = buf[:pkt_len], buf[pkt_len:]
+            self.sstp_packet_received(pkt)
+
+        self.receive_buf = bytearray(buf)
 
     def sstp_packet_received(self, packet: memoryview) -> None:
         c = packet[1] & 0x01
         if c == 0:  # Data packet
-            self.sstp_data_packet_received(packet[4:].tobytes())
+            self.sstp_data_packet_received(packet[4:])
         else:  # Control packet
             msg_type = packet[4:6].tobytes()
             num_attrs = struct.unpack("!H", packet[6:8])[0]
@@ -248,7 +249,7 @@ class SSTPProtocol(Protocol):
                 attributes.append((id, value))
             self.sstp_control_packet_received(packet, msg_type, attributes)
 
-    def sstp_data_packet_received(self, data: bytes) -> None:
+    def sstp_data_packet_received(self, data: memoryview) -> None:
         if self.pppd is None:
             print("pppd is None.")
             return
@@ -256,7 +257,7 @@ class SSTPProtocol(Protocol):
             self.state == State.SERVER_CALL_CONNECTED_PENDING
             and is_ppp_control_frame(data)
         ):
-            if self.logger.isEnabledFor(logging.DEBUG):
+            if self.factory.log_level <= logging.DEBUG:
                 self.logger.debug("sstp => pppd (%s bytes).", len(data))
                 self.logger.log(VERBOSE, hexdump(data))
             # LCP may not been done before SERVER_CALL_CONNECTED
@@ -593,10 +594,13 @@ class SSTPProtocol(Protocol):
 
     def reset_hello_timer(self, close: bool = False) -> None:
         if self.hello_timer is not None:
-            self.hello_timer.cancel()
-        self.hello_timer = self.loop.call_later(
-            HELLO_TIMEOUT, partial(self.hello_timer_expired, close=close)
-        )
+            if self.hello_timer.when() - self.loop.time() < HELLO_TIMEOUT * 0.9:
+                self.hello_timer.cancel()
+                self.hello_timer = None
+        if self.hello_timer is None:
+            self.hello_timer = self.loop.call_later(
+                HELLO_TIMEOUT, partial(self.hello_timer_expired, close=close)
+            )
 
     def add_retry_counter_or_abort(self) -> None:
         self.retry_counter += 1
@@ -647,7 +651,7 @@ class SSTPProtocol(Protocol):
         elif self.state != State.SERVER_CALL_CONNECTED:
             return
         for frame in frames:
-            if self.logger.isEnabledFor(logging.DEBUG):
+            if self.factory.log_level <= logging.DEBUG:
                 self.logger.debug("pppd => sstp (%d bytes)", len(frame))
                 self.logger.log(VERBOSE, hexdump(bytes(frame)))
             if self.transport:
@@ -688,6 +692,7 @@ class SSTPProtocolFactory:
         self.remote_pool = remote_pool
         self.cert_hash = cert_hash
         self.logger = logger
+        self.log_level = config.log_level
 
     def __call__(self) -> SSTPProtocol:
         return self.protocol(self)

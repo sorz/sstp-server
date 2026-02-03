@@ -78,9 +78,9 @@ class PPPDProtocol(asyncio.SubprocessProtocol):
         self.pty_file: FileIO | None = None
         self.plugin = Plugin(self)
 
-    def write_frame(self, frame: bytes, full_escape) -> None:
+    def write_frame(self, frame: memoryview, full_escape) -> None:
         if self.write_transport:
-            self.write_transport.write(escape(frame, full_escape))
+            self.write_transport.write(escape(frame.tobytes(), full_escape))
 
     def connection_made(self, transport: asyncio.BaseTransport) -> None:
         assert isinstance(transport, asyncio.SubprocessTransport)
