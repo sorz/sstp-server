@@ -213,73 +213,79 @@ class SSTPProtocol(Protocol):
         self.reset_hello_timer()
         if self.receive_buf:
             self.receive_buf.extend(data)
-            buf = memoryview(self.receive_buf)
+            buf = memoryview(self.receive_buf).toreadonly()
         else:
-            buf = memoryview(data)
+            buf = memoryview(data).toreadonly()
 
+        data_pkts = []
         while len(buf) >= 4:
-            # Check version.
-            if buf[0] != 0x10:
+            # parse header
+            ver = buf[0]
+            is_ctrl_pkt = buf[1] & 0x01 == 1
+            pkt_len = parse_length(buf[2:4])
+
+            # check version & length
+            if ver != 0x10:
                 self.logger.warning("Unsupported SSTP version.")
                 if self.transport:
                     self.transport.close()
                 return
-            pkt_len = parse_length(buf[2:4])
             if len(buf) < pkt_len:
                 break
+
             pkt, buf = buf[:pkt_len], buf[pkt_len:]
-            self.sstp_packet_received(pkt)
+            if is_ctrl_pkt:
+                self.sstp_control_packet_received(pkt)
+            else:  # data packets: process in batch
+                data_pkts.append(pkt[4:])
 
         self.receive_buf = bytearray(buf)
+        self.sstp_data_packets_received(data_pkts)
 
-    def sstp_packet_received(self, packet: memoryview) -> None:
-        c = packet[1] & 0x01
-        if c == 0:  # Data packet
-            self.sstp_data_packet_received(packet[4:])
-        else:  # Control packet
-            msg_type = packet[4:6].tobytes()
-            num_attrs = struct.unpack("!H", packet[6:8])[0]
-            attributes = []
-            attrs = packet[8:]
-            while len(attributes) < num_attrs:
-                id = attrs[1:2].tobytes()
-                length = parse_length(attrs[2:4])
-                value = attrs[4:length].tobytes()
-                attrs = attrs[length:]
-                attributes.append((id, value))
-            self.sstp_control_packet_received(packet, msg_type, attributes)
-
-    def sstp_data_packet_received(self, data: memoryview) -> None:
+    def sstp_data_packets_received(self, pkts: list[memoryview]) -> None:
         if self.pppd is None:
             print("pppd is None.")
             return
-        if self.state == State.SERVER_CALL_CONNECTED or (
-            self.state == State.SERVER_CALL_CONNECTED_PENDING
-            and is_ppp_control_frame(data)
+        if self.state == State.SERVER_CALL_CONNECTED_PENDING:
+            # only ppp control frames are allowed
+            pkts = [p for p in pkts if is_ppp_control_frame(p)]
+
+        if self.state in (
+            State.SERVER_CALL_CONNECTED,
+            State.SERVER_CALL_CONNECTED_PENDING,
         ):
             if self.factory.log_level <= logging.DEBUG:
-                self.logger.debug("sstp => pppd (%s bytes).", len(data))
-                self.logger.log(VERBOSE, hexdump(data))
+                self.logger.debug("sstp => pppd (%s packets)", len(pkts))
+                for pkt in pkts:
+                    self.logger.log(VERBOSE, "sstp => pppd (%s bytes)", len(pkt))
+                    self.logger.log(VERBOSE, hexdump(pkt))
             # LCP may not been done before SERVER_CALL_CONNECTED
             # assume asyncmap = 0 after fully connected
             full_escape = self.state != State.SERVER_CALL_CONNECTED
-            self.pppd.write_frame(data, full_escape)
+            self.pppd.write_frames(pkts, full_escape)
         else:
             self.logger.info("drop ppp frame from client")
 
-    def sstp_control_packet_received(
-        self,
-        packet: memoryview,
-        msg_type: bytes,
-        attributes: list[tuple[bytes, bytes]],
-    ) -> None:
+    def sstp_control_packet_received(self, packet: memoryview) -> None:
+        # decode message type
         try:
-            type = MsgType(msg_type)
+            type = MsgType(packet[4:6].tobytes())
         except ValueError:
             self.logger.warning("Unknown type of SSTP control packet.")
             self.abort(ATTRIB_STATUS_INVALID_FRAME_RECEIVED)
             return
         self.logger.info("SSTP control packet (%s) received.", type.name)
+
+        # decode attributes
+        num_attrs = struct.unpack("!H", packet[6:8])[0]
+        attributes = []
+        attrs = packet[8:]
+        while len(attributes) < num_attrs:
+            id = attrs[1:2].tobytes()
+            length = parse_length(attrs[2:4])
+            value = attrs[4:length].tobytes()
+            attrs = attrs[length:]
+            attributes.append((id, value))
 
         match type:
             case MsgType.CALL_CONNECT_REQUEST:

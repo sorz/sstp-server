@@ -9,35 +9,37 @@ frames = [random.randbytes(1500) for _ in range(20)]
 decoder = PppDecoder()
 
 
-def get_escaped(full: bool, size) -> bytes:
-    return b".".join([escape(f, full) for f in frames[:size]])
+def get_escaped(full: bool, size) -> bytearray:
+    return escape([memoryview(f) for f in frames[:size]], full)
 
 
 def bench_unescape(full: bool, size: int) -> float:
     return timeit.timeit(
         "decoder.unescape(data)",
-        setup="data = get_escaped(full, size)",
+        setup="data = bytes(get_escaped(full, size))",
         globals=dict(**globals(), full=full, size=size),
     )
 
 
 def bench_escape(full: bool) -> float:
     return timeit.timeit(
-        "escape(frames[0], full)",
+        "escape(fs, full)",
+        setup="fs = [memoryview(frames[0])]",
         globals=dict(**globals(), full=full),
     )
 
 
 def codec_test() -> None:
-    escaped_full = escape(frames[0], True)
-    escaped = escape(frames[0], False)
-    print(f"escaped: {len(frames[0])} => {len(escaped)}/{len(escaped_full)} bytes")
+    frame = memoryview(frames[0])
+    escaped_full = escape([frame], True)
+    escaped = escape([frame], False)
+    print(f"escaped: {len(frame)} => {len(escaped)}/{len(escaped_full)} bytes")
     unescaped = PppDecoder().unescape(bytes(escaped))
     assert len(unescaped) == 1
     print("unescaped: %d bytes" % len(unescaped[0]))
-    assert unescaped[0] == frames[0]
+    assert unescaped[0] == frame
     unescaped = PppDecoder().unescape(bytes(escaped_full))
-    assert unescaped[0] == frames[0]
+    assert unescaped[0] == frame
 
 
 def main() -> None:
