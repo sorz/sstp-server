@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+from asyncio.transports import WriteTransport
 from io import FileIO
 from logging import Logger
 from typing import TypedDict
@@ -42,10 +43,18 @@ class PTYSender(asyncio.Protocol):
         self.pppd = pppd
 
     def connection_made(self, transport: asyncio.BaseTransport) -> None:
-        self.pppd.write_transport = transport  # type: ignore
+        assert isinstance(transport, WriteTransport)
+        self.pppd.write_transport = transport
+        transport.set_write_buffer_limits(512 * 1024, 128 * 1024)
 
     def connection_lost(self, exc: Exception | None) -> None:
         pass
+
+    def pause_writing(self) -> None:
+        self.pppd.sstp.pause_producing()
+
+    def resume_writing(self) -> None:
+        self.pppd.sstp.resume_producing()
 
 
 class PPPDProtocol(asyncio.SubprocessProtocol):
