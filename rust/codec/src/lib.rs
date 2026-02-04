@@ -4,8 +4,7 @@ mod encode;
 use pyo3::buffer::PyBuffer;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use pyo3::types::{PyByteArray, PyBytes, PyList, PyMemoryView, PySlice};
-use smallvec::SmallVec;
+use pyo3::types::{PyByteArray, PyBytes, PyList, PyMemoryView};
 
 const FLAG_SEQUENCE: u8 = 0x7e;
 const CONTROL_ESCAPE: u8 = 0x7d;
@@ -14,7 +13,7 @@ const ESCAPE_MASK: u8 = 0x20;
 /// Escape a PPP frame ending with correct FCS code.
 #[pyfunction]
 #[pyo3(signature = (frames, full = true))]
-fn escape<'py>(
+fn sstp_to_ppp<'py>(
     py: Python<'py>,
     frames: &Bound<'py, PyList>,
     full: bool,
@@ -28,7 +27,7 @@ fn escape<'py>(
         for item in frames.iter() {
             let data = {
                 let mv = item.cast::<PyMemoryView>()?;
-                let buf = PyBuffer::<u8>::get(&mv)?;
+                let buf = PyBuffer::<u8>::get(mv)?;
                 if !buf.readonly() {
                     return Err(PyValueError::new_err("frame must be readonly buffer"));
                 }
@@ -61,45 +60,71 @@ impl PppDecoder {
         }
     }
 
-    /// Unescape PPP frame stream, return a list of unescaped frame.
-    fn unescape<'py>(
+    /// Decode stream of PPP frames into stream of SSTP packets
+    /// Optionally keep only PPP control protocols
+    fn ppp_to_sstp<'py>(
         &mut self,
         py: Python<'py>,
         data: &Bound<'py, PyBytes>,
-    ) -> PyResult<Vec<Bound<'py, PyAny>>> {
+        ctrl_only: bool,
+    ) -> PyResult<Bound<'py, PyByteArray>> {
         let data = data.as_bytes();
-
-        let mut frames = SmallVec::new();
-        let buf = PyByteArray::new_with(py, self.frame.len() + data.len(), |buf| {
-            decode::decode_frames(&mut self.frame, data, buf, &mut frames);
+        let max_output_len = self.frame.len() + data.len() + 512; // FIXME
+        let mut output_len = 0;
+        let buf = PyByteArray::new_with(py, max_output_len, |buf| {
+            output_len = decode::decode_frames(&mut self.frame, data, buf, ctrl_only);
             Ok(())
         })?;
-
-        match frames.len() {
-            0 => Ok(vec![]),
-            1 if frames[0].start() == 0 => {
-                // fast path: return bytearray
-                buf.resize(frames[0].len())?;
-                Ok(vec![buf.into_any()])
-            }
-            _ => {
-                // memoryview slicing (avoid data copy)
-                let buf = PyMemoryView::from(&buf)?;
-                frames
-                    .into_iter()
-                    .map(|f| {
-                        let slice = PySlice::new(py, f.start() as isize, f.end() as isize, 1);
-                        buf.get_item(slice)
-                    })
-                    .collect()
-            }
-        }
+        buf.resize(output_len)?;
+        Ok(buf)
     }
 }
 
 #[pymodule]
 fn codec(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_function(wrap_pyfunction!(escape, m)?)?;
+    m.add_function(wrap_pyfunction!(sstp_to_ppp, m)?)?;
     m.add_class::<PppDecoder>()?;
     Ok(())
+}
+
+#[test]
+fn test_encode_decode() {
+    let mut f1 = [0u8; 10];
+    let mut f2 = [0u8; 500];
+    let mut f3 = [0u8; 2000];
+    rand::fill(&mut f1);
+    rand::fill(&mut f2);
+    rand::fill(&mut f3);
+
+    let mut ppp = vec![0u8; 4000];
+    let mut len = 0;
+    len += encode::encode_frame(true, &f1, &mut ppp[len..]);
+    len += encode::encode_frame(false, &f1, &mut ppp[len..]);
+    len += encode::encode_frame(true, &f2, &mut ppp[len..]);
+    len += encode::encode_frame(false, &f2, &mut ppp[len..]);
+    len += encode::encode_frame(false, &f3, &mut ppp[len..]);
+    let ppp_len = (10 + 500) * 2 + 2000;
+    assert!(len > ppp_len);
+    assert!(len < ppp.len());
+    ppp.resize(len, 0);
+
+    let mut partial = decode::PartialFrame::default();
+    let mut sstp = vec![0u8; 4000];
+    let n = decode::decode_frames(&mut partial, &ppp, &mut sstp, false);
+    assert_eq!(n, ppp_len + 4 * 5);
+
+    assert_eq!([0x10, 0, 0, 14], sstp[..4]);
+    assert_eq!(f1, sstp[4..14]);
+
+    assert_eq!([0x10, 0, 0, 14], sstp[14..18]);
+    assert_eq!(f1, sstp[18..28]);
+
+    assert_eq!([0x10, 0, 1, 248], sstp[28..32]);
+    assert_eq!(f2, sstp[32..532]);
+
+    assert_eq!([0x10, 0, 1, 248], sstp[532..536]);
+    assert_eq!(f2, sstp[536..1036]);
+
+    assert_eq!([0x10, 0, 7, 212], sstp[1036..1040]);
+    assert_eq!(f3, sstp[1040..3040]);
 }

@@ -1,14 +1,13 @@
 import asyncio
 import logging
 import os
-from asyncio.transports import WriteTransport
+from asyncio.transports import ReadTransport, WriteTransport
+from dataclasses import dataclass
 from io import FileIO
 from logging import Logger
-from typing import TypedDict
+from typing import Callable, TypedDict
 
-from .codec import PppDecoder, escape
-from .constants import VERBOSE
-from .utils import hexdump
+from .codec import sstp_to_ppp
 
 
 class CompoundMacKey(TypedDict, total=False):
@@ -24,15 +23,24 @@ def is_ppp_control_frame(frame: memoryview | bytearray | bytes) -> bool:
     return protocol[0] in (0x80, 0x82, 0xC0, 0xC2, 0xC4)
 
 
+@dataclass
+class PPPCallback:
+    pause_producing: Callable[[], None]
+    resume_producing: Callable[[], None]
+    data_received: Callable[[bytes], None]
+    exited: Callable[[], None]
+
+
 class PTYReceiver(asyncio.Protocol):
     def __init__(self, pppd: "PPPDProtocol") -> None:
         self.pppd = pppd
 
     def connection_made(self, transport: asyncio.BaseTransport) -> None:
-        self.pppd.read_transport = transport  # type: ignore
+        assert isinstance(transport, ReadTransport)
+        self.pppd.read_transport = transport
 
     def data_received(self, data: bytes) -> None:
-        self.pppd.out_received(data)
+        self.pppd.callback.data_received(data)
 
     def connection_lost(self, exc: Exception | None) -> None:
         pass
@@ -51,27 +59,26 @@ class PTYSender(asyncio.Protocol):
         pass
 
     def pause_writing(self) -> None:
-        self.pppd.sstp.pause_producing()
+        self.pppd.callback.pause_producing()
 
     def resume_writing(self) -> None:
-        self.pppd.sstp.resume_producing()
+        self.pppd.callback.resume_producing()
 
 
 class PPPDProtocol(asyncio.SubprocessProtocol):
     def __init__(
         self,
         logger: Logger,
-        sstp: "SSTPProtocol",
         remote: str,
         master_fd: int,
         slave_fd: int,
+        callback: PPPCallback,
     ) -> None:
         self.logger = logger
-        self.sstp = sstp
         self.remote = remote
         self.master_fd = master_fd
         self.slave_fd = slave_fd
-        self.decoder = PppDecoder()
+        self.callback = callback
         self.transport: asyncio.SubprocessTransport | None = None
         self.write_transport: asyncio.WriteTransport | None = None
         self.read_transport: asyncio.ReadTransport | None = None
@@ -80,7 +87,7 @@ class PPPDProtocol(asyncio.SubprocessProtocol):
 
     def write_frames(self, frames: list[memoryview], full_escape) -> None:
         if self.write_transport:
-            buf = escape(frames, full_escape)
+            buf = sstp_to_ppp(frames, full_escape)
             self.write_transport.write(buf)
 
     def connection_made(self, transport: asyncio.BaseTransport) -> None:
@@ -110,12 +117,6 @@ class PPPDProtocol(asyncio.SubprocessProtocol):
                 self.logger.debug("pppd (stderr): %s", data.decode(errors="replace"))
                 self.plugin.out_received(data)
 
-    def out_received(self, data: bytes) -> None:
-        if self.logger.isEnabledFor(VERBOSE):
-            self.logger.log(VERBOSE, "Raw data: %s", hexdump(data))
-        frames = self.decoder.unescape(data)
-        self.sstp.write_ppp_frames(frames)
-
     def connection_lost(self, exc: Exception | None) -> None:
         if exc is None:
             self.logger.debug("pppd closed with EoF")
@@ -141,7 +142,7 @@ class PPPDProtocol(asyncio.SubprocessProtocol):
         if self.transport is not None:
             returncode = self.transport.get_returncode()
             self.logger.info("pppd exited with code %s", returncode)
-        self.sstp.ppp_stopped()
+        self.callback.exited()
 
     def pause_producing(self) -> None:
         self.logger.debug("Pause producting")
@@ -156,22 +157,22 @@ class PPPDProtocol(asyncio.SubprocessProtocol):
 
 class PPPDProtocolFactory:
     def __init__(
-        self,
-        sstp: "SSTPProtocol",
-        remote: str,
-        master_fd: int,
-        slave_fd: int,
+        self, remote: str, master_fd: int, slave_fd: int, callback: PPPCallback
     ) -> None:
         # TODO: set session info to logger
         self.logger = logging.getLogger("PPPD")
-        self.sstp = sstp
         self.remote = remote
         self.master_fd = master_fd
         self.slave_fd = slave_fd
+        self.callback = callback
 
     def __call__(self) -> PPPDProtocol:
         return PPPDProtocol(
-            self.logger, self.sstp, self.remote, self.master_fd, self.slave_fd
+            self.logger,
+            self.remote,
+            self.master_fd,
+            self.slave_fd,
+            self.callback,
         )
 
 

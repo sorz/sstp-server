@@ -15,6 +15,7 @@ from typing import Any
 from . import __version__
 from .address import IPPool
 from .certtool import Fingerprint
+from .codec import PppDecoder
 from .constants import (
     ATTRIB_STATUS_INVALID_FRAME_RECEIVED,
     ATTRIB_STATUS_NEGOTIATION_TIMEOUT,
@@ -32,12 +33,8 @@ from .constants import (
     HashProtocol,
     MsgType,
 )
-from .packets import SSTPControlPacket, SSTPDataPacket
-from .ppp import (
-    PPPDProtocol,
-    PPPDProtocolFactory,
-    is_ppp_control_frame,
-)
+from .packets import SSTPControlPacket
+from .ppp import PPPCallback, PPPDProtocol, PPPDProtocolFactory, is_ppp_control_frame
 from .proxy_protocol import PPException, PPNoEnoughData, parse_pp_header
 from .utils import hexdump
 
@@ -75,6 +72,7 @@ class SSTPProtocol(Protocol):
         self.receive_buf = bytearray()
         self.nonce: bytes | None = None
         self.pppd: PPPDProtocol | None = None
+        self.ppp_decoder = PppDecoder()
         self.retry_counter = 0
         self.hello_timer: asyncio.TimerHandle | None = None
         self.reset_hello_timer()
@@ -424,7 +422,17 @@ class SSTPProtocol(Protocol):
         if self.remote_port is not None:
             ppp_env["SSTP_REMOTE_PORT"] = str(self.remote_port)
 
-        factory = PPPDProtocolFactory(self, remote, master_fd, slave_fd)
+        factory = PPPDProtocolFactory(
+            remote=remote,
+            master_fd=master_fd,
+            slave_fd=slave_fd,
+            callback=PPPCallback(
+                pause_producing=self.pause_producing,
+                resume_producing=self.resume_producing,
+                data_received=self.ppp_data_received,
+                exited=self.ppp_exited,
+            ),
+        )
         coro = self.loop.subprocess_exec(factory, self.factory.pppd, *args, env=ppp_env)
         task = asyncio.ensure_future(coro)
         task.add_done_callback(self.pppd_started)
@@ -651,23 +659,25 @@ class SSTPProtocol(Protocol):
         if self.transport is not None:
             self.transport.resume_reading()
 
-    def write_ppp_frames(self, frames: list[memoryview | bytearray]) -> None:
-        if self.state == State.SERVER_CALL_CONNECTED_PENDING:
-            frames = [f for f in frames if is_ppp_control_frame(f)]
-        elif self.state != State.SERVER_CALL_CONNECTED:
-            return
+    def ppp_data_received(self, data: bytes) -> None:
+        match self.state:
+            case State.SERVER_CALL_CONNECTED:
+                ctrl_only = False
+            case State.SERVER_CALL_CONNECTED_PENDING:
+                ctrl_only = True
+            case state:
+                self.logger.debug("drop %d bytes ppp data under %s", len(data), state)
+                return
+        sstp = self.ppp_decoder.ppp_to_sstp(data, ctrl_only)
         if self.factory.log_level <= logging.DEBUG:
-            self.logger.debug("pppd => sstp (%d frames)", len(frames))
-            for f in frames:
-                self.logger.log(VERBOSE, hexdump(f))
+            self.logger.debug("ppp => sstp (%d => %d)", len(data), len(sstp))
+            self.logger.log(VERBOSE, hexdump(data))
+            self.logger.log(VERBOSE, hexdump(sstp))
 
-        buf = bytearray()
-        for frame in frames:
-            SSTPDataPacket(frame).write_to_buf(buf)
-        if self.transport:
-            self.transport.write(buf)
+        assert self.transport is not None
+        self.transport.write(sstp)
 
-    def ppp_stopped(self) -> None:
+    def ppp_exited(self) -> None:
         if (
             self.state != State.SERVER_CONNECT_REQUEST_PENDING
             and self.state != State.SERVER_CALL_CONNECTED_PENDING
