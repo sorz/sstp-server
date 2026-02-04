@@ -1,9 +1,6 @@
 import struct
-from typing import Any, Callable
 
 from sstpd.constants import MsgType
-
-type WriteFunc = Callable[[bytes | bytearray | memoryview], Any]
 
 
 class SSTPPacket:
@@ -13,9 +10,14 @@ class SSTPPacket:
         self.c = c & 0x01
         self.data = data
 
-    def write_to(self, func: WriteFunc) -> None:
-        func(struct.pack("!BBH", self._version, self.c, len(self.data) + 4))
-        func(self.data)
+    def write_to(self, func) -> None:
+        buf = bytearray()
+        self.write_to_buf(buf)
+        func(buf)
+
+    def write_to_buf(self, buf: bytearray) -> None:
+        buf.extend(struct.pack("!BBH", self._version, self.c, len(self.data) + 4))
+        buf.extend(self.data)
 
 
 class SSTPDataPacket(SSTPPacket):
@@ -31,7 +33,7 @@ class SSTPControlPacket(SSTPPacket):
         self.message_type = message_type
         self.attributes = attributes
 
-    def write_to(self, func: WriteFunc) -> Any:
+    def write_to(self, func):
         num_attribute = struct.pack("!H", len(self.attributes))
         self.data = self.message_type.value + num_attribute
         for attr_id, attr_value in self.attributes:

@@ -656,12 +656,16 @@ class SSTPProtocol(Protocol):
             frames = [f for f in frames if is_ppp_control_frame(f)]
         elif self.state != State.SERVER_CALL_CONNECTED:
             return
+        if self.factory.log_level <= logging.DEBUG:
+            self.logger.debug("pppd => sstp (%d frames)", len(frames))
+            for f in frames:
+                self.logger.log(VERBOSE, hexdump(f))
+
+        buf = bytearray()
         for frame in frames:
-            if self.factory.log_level <= logging.DEBUG:
-                self.logger.debug("pppd => sstp (%d bytes)", len(frame))
-                self.logger.log(VERBOSE, hexdump(bytes(frame)))
-            if self.transport:
-                SSTPDataPacket(frame).write_to(self.transport.write)
+            SSTPDataPacket(frame).write_to_buf(buf)
+        if self.transport:
+            self.transport.write(buf)
 
     def ppp_stopped(self) -> None:
         if (

@@ -2,7 +2,7 @@ import binascii
 
 
 class hexdump:
-    def __init__(self, s: bytes | memoryview) -> None:
+    def __init__(self, s: bytes | bytearray | memoryview) -> None:
         self.s = s
 
     def __str__(self) -> str:
