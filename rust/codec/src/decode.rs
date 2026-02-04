@@ -3,6 +3,7 @@ use core::arch::x86_64::{
     _mm512_cmpeq_epi8_mask, _mm512_loadu_epi8, _mm512_mask_blend_epi8,
     _mm512_mask_compressstoreu_epi8, _mm512_set1_epi8, _mm512_xor_si512,
 };
+use std::cmp;
 
 use crate::{CONTROL_ESCAPE, ESCAPE_MASK, FLAG_SEQUENCE};
 
@@ -72,6 +73,12 @@ impl<'a> FrameWriter<'a> {
     #[cfg(avx512_decode)]
     fn adv(&mut self, n: usize) {
         self.pos += n;
+    }
+
+    #[inline]
+    fn has_space_for(&self, ppp_bytes: usize) -> bool {
+        let ppp_bytes = cmp::min(0x0fff - 4, ppp_bytes);
+        ppp_bytes == 0 || self.pos + ppp_bytes < self.buf.len()
     }
 
     /// Move `tail` bytes to the next SSTP packet before finish current one
@@ -161,9 +168,14 @@ pub(crate) fn decode_frames(
 
 fn decode_scalar(input: &[u8], esc_first: bool, writer: &mut FrameWriter) -> bool {
     let mut mask = if esc_first { ESCAPE_MASK } else { 0 };
-    for &byte in input {
+    for (byte_consumed, &byte) in input.iter().enumerate() {
         match byte {
-            FLAG_SEQUENCE => writer.next_frame(),
+            FLAG_SEQUENCE => {
+                writer.next_frame();
+                if !writer.has_space_for(input.len() - (byte_consumed + 1)) {
+                    return false;
+                }
+            }
             CONTROL_ESCAPE => mask = ESCAPE_MASK,
             _ => {
                 writer.write_u8(byte ^ mask);
@@ -186,7 +198,7 @@ fn decode_vector<'a>(
 
     let mut escape: u64 = if esc_first { 1 } else { 0 };
     let mut chunks = input.chunks_exact(64);
-    for chunk in chunks.by_ref() {
+    for (chunk_consumed, chunk) in chunks.by_ref().enumerate() {
         let (mut keep, mut flag) = unsafe {
             // load data & compare with flag/ctrl
             let input = _mm512_loadu_epi8(chunk.as_ptr() as *const i8);
@@ -209,6 +221,7 @@ fn decode_vector<'a>(
             // fast path
             writer.adv(keep.count_ones() as usize);
         } else {
+            let mut bytes_consumed = chunk_consumed * 64;
             while keep > 0 {
                 let n = flag.trailing_zeros();
                 let len = (keep.unbounded_shl(64 - n)).count_ones();
@@ -216,6 +229,11 @@ fn decode_vector<'a>(
                 if flag > 0 {
                     let tail = keep.count_ones() - len;
                     writer.insert_frame(tail as usize);
+                    bytes_consumed += len as usize;
+                    if !writer.has_space_for(input.len() - bytes_consumed) {
+                        // TODO: log warning
+                        return (false, &[]);
+                    }
                 }
                 flag = flag.unbounded_shr(n + 1);
                 keep = keep.unbounded_shr(n + 1);

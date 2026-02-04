@@ -5,6 +5,7 @@ use pyo3::buffer::PyBuffer;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyByteArray, PyBytes, PyList, PyMemoryView};
+use std::cmp;
 
 const FLAG_SEQUENCE: u8 = 0x7e;
 const CONTROL_ESCAPE: u8 = 0x7d;
@@ -69,7 +70,10 @@ impl PppDecoder {
         ctrl_only: bool,
     ) -> PyResult<Bound<'py, PyByteArray>> {
         let data = data.as_bytes();
-        let max_output_len = self.frame.len() + data.len() + 512; // FIXME
+        // each frame take up to [input + 1] bytes (4B sstp - 3B ppp flag/fcs),
+        // with 2 more bytes for the last one (fcs before remove).
+        // shortest ppp is 4B. 256 buffer should be enough?
+        let max_output_len = self.frame.len() + data.len() + cmp::min(data.len() / 4 + 2, 256);
         let mut output_len = 0;
         let buf = PyByteArray::new_with(py, max_output_len, |buf| {
             output_len = decode::decode_frames(&mut self.frame, data, buf, ctrl_only);
