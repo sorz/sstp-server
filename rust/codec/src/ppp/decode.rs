@@ -126,9 +126,14 @@ impl<'a> FrameWriter<'a> {
 
     /// Return written SSTP streams and unfinished PPP frame (if any)
     fn finish(self) -> (&'a [u8], &'a [u8]) {
+        let todo = self.start + SSTP_HEADER_LEN..self.pos;
         (
             &self.buf[..self.start],
-            &self.buf[self.start + SSTP_HEADER_LEN..self.pos],
+            if todo.is_empty() {
+                &[]
+            } else {
+                &self.buf[todo]
+            },
         )
     }
 }
