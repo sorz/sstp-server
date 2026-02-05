@@ -1,15 +1,10 @@
-mod decode;
-mod encode;
+mod ppp;
 
 use pyo3::buffer::PyBuffer;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyByteArray, PyBytes, PyList, PyMemoryView};
 use std::cmp;
-
-const FLAG_SEQUENCE: u8 = 0x7e;
-const CONTROL_ESCAPE: u8 = 0x7d;
-const ESCAPE_MASK: u8 = 0x20;
 
 /// Escape a PPP frame ending with correct FCS code.
 #[pyfunction]
@@ -38,7 +33,7 @@ fn sstp_to_ppp<'py>(
                 // no code on Python side will read/write to this buffer
                 unsafe { std::slice::from_raw_parts(buf, len) }
             };
-            output_len += encode::encode_frame(full, data, &mut buf[output_len..]);
+            output_len += ppp::encode_frame(full, data, &mut buf[output_len..]);
         }
         Ok(())
     })?;
@@ -49,7 +44,7 @@ fn sstp_to_ppp<'py>(
 /// PPP Decoder
 #[pyclass]
 struct PppDecoder {
-    frame: decode::PartialFrame,
+    frame: ppp::PartialFrame,
 }
 
 #[pymethods]
@@ -76,7 +71,7 @@ impl PppDecoder {
         let max_output_len = self.frame.len() + data.len() + cmp::min(data.len() / 4 + 2, 256);
         let mut output_len = 0;
         let buf = PyByteArray::new_with(py, max_output_len, |buf| {
-            output_len = decode::decode_frames(&mut self.frame, data, buf, ctrl_only);
+            output_len = ppp::decode_frames(&mut self.frame, data, buf, ctrl_only);
             Ok(())
         })?;
         buf.resize(output_len)?;
@@ -89,46 +84,4 @@ fn codec(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(sstp_to_ppp, m)?)?;
     m.add_class::<PppDecoder>()?;
     Ok(())
-}
-
-#[test]
-fn test_encode_decode() {
-    let mut f1 = [0u8; 10];
-    let mut f2 = [0u8; 500];
-    let mut f3 = [0u8; 2000];
-    rand::fill(&mut f1);
-    rand::fill(&mut f2);
-    rand::fill(&mut f3);
-
-    let mut ppp = vec![0u8; 4000];
-    let mut len = 0;
-    len += encode::encode_frame(true, &f1, &mut ppp[len..]);
-    len += encode::encode_frame(false, &f1, &mut ppp[len..]);
-    len += encode::encode_frame(true, &f2, &mut ppp[len..]);
-    len += encode::encode_frame(false, &f2, &mut ppp[len..]);
-    len += encode::encode_frame(false, &f3, &mut ppp[len..]);
-    let ppp_len = (10 + 500) * 2 + 2000;
-    assert!(len > ppp_len);
-    assert!(len < ppp.len());
-    ppp.resize(len, 0);
-
-    let mut partial = decode::PartialFrame::default();
-    let mut sstp = vec![0u8; 4000];
-    let n = decode::decode_frames(&mut partial, &ppp, &mut sstp, false);
-    assert_eq!(n, ppp_len + 4 * 5);
-
-    assert_eq!([0x10, 0, 0, 14], sstp[..4]);
-    assert_eq!(f1, sstp[4..14]);
-
-    assert_eq!([0x10, 0, 0, 14], sstp[14..18]);
-    assert_eq!(f1, sstp[18..28]);
-
-    assert_eq!([0x10, 0, 1, 248], sstp[28..32]);
-    assert_eq!(f2, sstp[32..532]);
-
-    assert_eq!([0x10, 0, 1, 248], sstp[532..536]);
-    assert_eq!(f2, sstp[536..1036]);
-
-    assert_eq!([0x10, 0, 7, 212], sstp[1036..1040]);
-    assert_eq!(f3, sstp[1040..3040]);
 }

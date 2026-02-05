@@ -8,7 +8,7 @@ use core::arch::x86_64::{
 };
 use crc_fast::CrcAlgorithm;
 
-use crate::{CONTROL_ESCAPE, ESCAPE_MASK, FLAG_SEQUENCE};
+use super::{CONTROL_ESCAPE, ESCAPE_MASK, FLAG_SEQUENCE};
 
 // FLAG_SEQUENCE, CONTROL_ESCAPE, and any < ESCAPE_MASK
 const ESACPE_MAP_FULL: [bool; 256] = {

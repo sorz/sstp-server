@@ -5,7 +5,7 @@ use core::arch::x86_64::{
 };
 use std::cmp;
 
-use crate::{CONTROL_ESCAPE, ESCAPE_MASK, FLAG_SEQUENCE};
+use super::{CONTROL_ESCAPE, ESCAPE_MASK, FLAG_SEQUENCE};
 
 const SSTP_HEADER_LEN: usize = 4;
 const SSTP_VERSION: u8 = 0x10;
