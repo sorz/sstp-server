@@ -248,7 +248,7 @@ fn decode_vector<'a>(
     (escape == 1, chunks.remainder())
 }
 
-fn is_ppp_ctrl_frame(buf: &[u8]) -> bool {
+pub(crate) fn is_ppp_ctrl_frame(buf: &[u8]) -> bool {
     if buf.starts_with(PPP_ADDR_CTRL) {
         buf.get(PPP_ADDR_CTRL.len())
     } else {

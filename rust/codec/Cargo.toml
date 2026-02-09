@@ -11,6 +11,7 @@ crate-type = ["cdylib"]
 pyo3 = { version = "0.27", features = ["extension-module", "abi3-py311"] }
 bytes = "1"
 crc-fast = "1"
+smallvec = "1"
 
 [build-dependencies]
 cfg_aliases = "0.2"

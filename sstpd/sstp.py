@@ -13,7 +13,7 @@ from typing import Any
 from . import __version__
 from .address import IPPool
 from .certtool import Fingerprint
-from .codec import PppDecoder
+from .codec import Ppp2Sstp, Sstp2Ppp
 from .constants import (
     ATTRIB_STATUS_INVALID_FRAME_RECEIVED,
     ATTRIB_STATUS_NEGOTIATION_TIMEOUT,
@@ -31,7 +31,7 @@ from .constants import (
     MsgType,
 )
 from .packets import SSTPControlPacket
-from .ppp import PPPCallback, PPPDProtocol, PPPDProtocolFactory, is_ppp_control_frame
+from .ppp import PPPCallback, PPPDProtocol, PPPDProtocolFactory
 from .proxy_protocol import PPException, PPNoEnoughData, parse_pp_header
 from .state import ServerState, State
 from .utils import hexdump
@@ -58,7 +58,8 @@ class SSTPProtocol(Protocol):
         self.receive_buf = bytearray()
         self.nonce: bytes | None = None
         self.pppd: PPPDProtocol | None = None
-        self.ppp_decoder = PppDecoder()
+        self.ppp_reader = Ppp2Sstp(self.write_sstp_data)
+        self.sstp_reader = Sstp2Ppp(self.sstp_control_packet_received)
         self.hello_timer = self.loop.create_task(self.run_hello_timer())
         self.need_proxy_protocol = self.factory.proxy_protocol
         self.correlation_id: str | None = None
@@ -90,11 +91,15 @@ class SSTPProtocol(Protocol):
     def data_received(self, data: bytes) -> None:
         if self.state.current == State.SERVER_CALL_DISCONNECTED:
             if self.need_proxy_protocol:
-                self.proxy_protocol_data_received(data)
+                return self.proxy_protocol_data_received(data)
             else:
-                self.http_data_received(data)
-        else:
-            self.sstp_data_received(data)
+                return self.http_data_received(data)
+        try:
+            self.sstp_reader.write(data)
+        except ValueError as err:
+            self.logger.warning("sstp protocl error: %s", err)
+            assert self.transport is not None
+            self.transport.close()
 
     def connection_lost(self, exc: Exception | None) -> None:
         self.logger.info("Connection finished.")
@@ -192,69 +197,14 @@ class SSTPProtocol(Protocol):
                 b"Server: SSTP-Server/%s\r\n\r\n" % str(__version__).encode()
             )
         self.logger.debug("http handshake done")
+        self.sstp_reader.write_ppp_data = self.write_ppp_data
         self.state.http_received()
 
-    def sstp_data_received(self, data: bytes) -> None:
-        if self.receive_buf:
-            self.receive_buf.extend(data)
-            buf = memoryview(self.receive_buf).toreadonly()
-        else:
-            buf = memoryview(data).toreadonly()
-
-        data_pkts = []
-        while len(buf) >= 4:
-            # parse header
-            ver = buf[0]
-            is_ctrl_pkt = buf[1] & 0x01 == 1
-            pkt_len = parse_length(buf[2:4])
-
-            # check version & length
-            if ver != 0x10:
-                self.logger.warning("Unsupported SSTP version.")
-                if self.transport:
-                    self.transport.close()
-                return
-            if len(buf) < pkt_len:
-                break
-
-            pkt, buf = buf[:pkt_len], buf[pkt_len:]
-            if is_ctrl_pkt:
-                self.sstp_control_packet_received(pkt)
-            else:  # data packets: process in batch
-                data_pkts.append(pkt[4:])
-
-        self.receive_buf = bytearray(buf)
-        self.sstp_data_packets_received(data_pkts)
-
-    def sstp_data_packets_received(self, pkts: list[memoryview]) -> None:
-        self.last_packet_at = self.loop.time()
-        if self.pppd is None:
-            print("pppd is None.")
-            return
-        if self.factory.log_level <= logging.DEBUG:
-            self.logger.debug("sstp => pppd (%s packets)", len(pkts))
-            for pkt in pkts:
-                self.logger.log(VERBOSE, "sstp => pppd (%s bytes)", len(pkt))
-                self.logger.log(VERBOSE, hexdump(pkt))
-
-        match self.state.current:
-            case State.SERVER_CALL_CONNECTED:
-                # assume asyncmap = 0 after fully connected
-                self.pppd.write_frames(pkts, False)
-            case State.SERVER_CALL_CONNECTED_PENDING:
-                # only ppp control frames are allowed
-                pkts = [p for p in pkts if is_ppp_control_frame(p)]
-                # LCP may not been done before SERVER_CALL_CONNECTED
-                # assume full escape here
-                self.pppd.write_frames(pkts, True)
-            case _:
-                self.logger.info("drop ppp frame from client")
-
-    def sstp_control_packet_received(self, packet: memoryview) -> None:
+    def sstp_control_packet_received(self, packet: bytes) -> None:
         self.last_packet_at = self.loop.time()
         # decode message type
         try:
-            type = MsgType(packet[4:6].tobytes())
+            type = MsgType(packet[4:6])
         except ValueError:
             self.logger.warning("Unknown type of SSTP control packet.")
             self.abort(ATTRIB_STATUS_INVALID_FRAME_RECEIVED)
@@ -266,9 +216,9 @@ class SSTPProtocol(Protocol):
         attributes = []
         attrs = packet[8:]
         while len(attributes) < num_attrs:
-            id = attrs[1:2].tobytes()
+            id = attrs[1:2]
             length = parse_length(attrs[2:4])
-            value = attrs[4:length].tobytes()
+            value = attrs[4:length]
             attrs = attrs[length:]
             attributes.append((id, value))
 
@@ -432,7 +382,7 @@ class SSTPProtocol(Protocol):
 
     def sstp_call_connected_received(
         self,
-        packet: memoryview,
+        packet: bytes,
         hash_type: HashProtocol,
         nonce: bytes,
         cert_hash: bytes,
@@ -487,6 +437,9 @@ class SSTPProtocol(Protocol):
         else:
             self.logger.warning("pppd plugin not loaded, crypto binding was skipped")
 
+        self.ppp_reader.ctrl_only = False
+        self.sstp_reader.ppp_ctrl_only = False
+        self.sstp_reader.ppp_full_escape = False
         self.state.call_connected()
         self.logger.info("Connection established.")
 
@@ -609,22 +562,39 @@ class SSTPProtocol(Protocol):
         self.transport.resume_reading()
 
     def ppp_data_received(self, data: bytes) -> None:
+        if self.factory.log_level <= logging.DEBUG:
+            self.logger.debug("ppp (%d) => sstp", len(data))
+            self.logger.log(VERBOSE, hexdump(data))
         match self.state.current:
-            case State.SERVER_CALL_CONNECTED:
-                ctrl_only = False
-            case State.SERVER_CALL_CONNECTED_PENDING:
-                ctrl_only = True
+            case State.SERVER_CALL_CONNECTED | State.SERVER_CALL_CONNECTED_PENDING:
+                self.ppp_reader.write(data)
             case invalid:
                 self.logger.debug("drop %d bytes ppp data under %s", len(data), invalid)
                 return
-        sstp = self.ppp_decoder.ppp_to_sstp(data, ctrl_only)
-        if self.factory.log_level <= logging.DEBUG:
-            self.logger.debug("ppp => sstp (%d => %d)", len(data), len(sstp))
-            self.logger.log(VERBOSE, hexdump(data))
-            self.logger.log(VERBOSE, hexdump(sstp))
 
+    def write_sstp_data(self, data: bytearray) -> None:
         assert self.transport is not None
-        self.transport.write(sstp)
+        if self.factory.log_level <= logging.DEBUG:
+            self.logger.debug("ppp => sstp (%d)", len(data))
+            self.logger.log(VERBOSE, hexdump(data))
+        self.loop.call_soon_threadsafe(self.transport.write, data)
+
+    def write_ppp_data(self, data: bytearray) -> None:
+        self.last_packet_at = self.loop.time()
+        if self.state.current not in (
+            State.SERVER_CALL_CONNECTED,
+            State.SERVER_CALL_CONNECTED_PENDING,
+        ):
+            self.logger.info("drop ppp frame from client")
+            return
+
+        if self.factory.log_level <= logging.DEBUG:
+            self.logger.debug("sstp => pppd (%s bytes)", len(data))
+            self.logger.log(VERBOSE, hexdump(data))
+
+        assert self.pppd is not None
+        assert self.pppd.write_transport is not None
+        self.pppd.write_transport.write(data)
 
     def ppp_exited(self) -> None:
         if self.state.is_closing():

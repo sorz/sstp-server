@@ -5,7 +5,7 @@ const FLAG_SEQUENCE: u8 = 0x7e;
 const CONTROL_ESCAPE: u8 = 0x7d;
 const ESCAPE_MASK: u8 = 0x20;
 
-pub(crate) use decode::{PartialFrame, decode_frames};
+pub(crate) use decode::{PartialFrame, decode_frames, is_ppp_ctrl_frame};
 pub(crate) use encode::encode_frame;
 
 #[test]
