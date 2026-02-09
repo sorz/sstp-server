@@ -7,10 +7,20 @@ from io import FileIO
 from logging import Logger
 from typing import Callable, TypedDict
 
+from .codec import sstp_to_ppp
+
 
 class CompoundMacKey(TypedDict, total=False):
     sha1: bytes
     sha256: bytes
+
+
+def is_ppp_control_frame(frame: memoryview | bytearray | bytes) -> bool:
+    if frame[0] == 0xFF and frame[1] == 0x03:
+        protocol = frame[2:4]
+    else:
+        protocol = frame[:2]
+    return protocol[0] in (0x80, 0x82, 0xC0, 0xC2, 0xC4)
 
 
 @dataclass
@@ -74,6 +84,11 @@ class PPPDProtocol(asyncio.SubprocessProtocol):
         self.read_transport: asyncio.ReadTransport | None = None
         self.pty_file: FileIO | None = None
         self.plugin = Plugin(self)
+
+    def write_frames(self, frames: list[memoryview], full_escape) -> None:
+        if self.write_transport:
+            buf = sstp_to_ppp(frames, full_escape)
+            self.write_transport.write(buf)
 
     def connection_made(self, transport: asyncio.BaseTransport) -> None:
         assert isinstance(transport, asyncio.SubprocessTransport)
